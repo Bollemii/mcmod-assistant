@@ -6,6 +6,13 @@
 # par tous les serveurs d'une même version de Minecraft.
 #
 # Données produites : server/data/servers/<slug>/<source>/
+#
+# Chaque source indique :
+# - ingester : script de server/ingestion/ qui la télécharge et la découpe ;
+# - refresh_days : mise à jour automatique (légère : pages modifiées seulement) quand la
+#   dernière date de plus de N jours. 0 = jamais automatiquement. Absent = valeur
+#   globale ASSIST_REFRESH_DAYS (7 par défaut). Les joueurs peuvent aussi la lancer
+#   avec /assist maj.
 
 [excalia]
 name = "Excalia"
@@ -18,12 +25,16 @@ description = "serveur Skyblock français, saison 3 au thème spatial"
 
 [excalia.sources.wiki]
 kind = "server_wiki"
+ingester = "excalia_wiki"
+refresh_days = 7
 api = "https://excalia.fr/api/wiki"
 wiki_key = "saison3"           # clé du wiki dans la réponse de l'API
 priority = 100
 
 [excalia.sources.patch_notes]
 kind = "server_news"
+ingester = "excalia_patch_notes"
+refresh_days = 7
 api = "https://excalia.fr/api/patch-notes"
 sitemap = "https://excalia.fr/sitemap.xml"   # l'API ne liste que les 20 dernières notes
 public_url = "https://excalia.fr/patch-notes/"

@@ -20,6 +20,15 @@ DEFAULT_MODELS = {
     "fake": "fake",
 }
 
+# Modèle d'embeddings par défaut (ASSIST_EMBED_MODEL le remplace). Changer de modèle
+# impose de recalculer tous les vecteurs : python -m db.load --force
+DEFAULT_EMBED_MODELS = {
+    "ollama": "bge-m3",                  # local (docker-compose.yml), 1024 dimensions, aucun quota
+    "gemini": "gemini-embedding-2",      # distant ; palier gratuit : 1 000 textes par jour
+    "openai": None,
+    "fake": "fake",
+}
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -38,6 +47,31 @@ class Settings:
     rate_limit: int = 10                # questions max par joueur…
     rate_window_s: int = 60             # …sur cette fenêtre glissante
     max_question_chars: int = 256       # limite du chat Minecraft
+
+    # --- RAG (phase 2) ---
+    # Base PostgreSQL + pgvector (docker-compose.yml). Vide : pas de RAG, l'API répond
+    # comme en phase 1 avec les connaissances générales du LLM.
+    database_url: str | None = None
+    # Embeddings : "ollama" (défaut, local), "openai" (autre API compatible), "gemini" ou "fake".
+    embed: str = "ollama"
+    embed_url: str = "http://127.0.0.1:11434/v1"   # Ollama, ou autre API compatible OpenAI
+    embed_threads: int = 8              # Ollama : threads de calcul (trop = plus lent sous Docker) ; 0 = défaut
+    embed_model: str | None = None      # None : DEFAULT_EMBED_MODELS[embed]
+    embed_dim: int = 1024               # doit correspondre à vector(1024) dans db/schema.sql
+    top_k: int = 8                      # extraits donnés au LLM
+    max_chunks_per_doc: int = 3         # pour varier les pages citées
+
+    # --- Mise à jour des sources ---
+    refresh_days: float = 7             # par défaut ; remplacé par refresh_days de chaque source
+    refresh_cooldown_min: float = 60    # délai minimal entre deux /assist maj d'une même source
+    refresh_check_s: int = 3600         # vérification périodique ; 0 = pas de mise à jour automatique
+
+    @property
+    def embed_model_name(self) -> str:
+        model = self.embed_model or DEFAULT_EMBED_MODELS.get(self.embed)
+        if not model:
+            raise ValueError(f"ASSIST_EMBED_MODEL est obligatoire avec ASSIST_EMBED={self.embed}")
+        return model
 
     @property
     def model_name(self) -> str:
@@ -70,4 +104,13 @@ def from_env(env_file: Path = ENV_FILE) -> Settings:
         log_file=_path(env.get("ASSIST_LOG_FILE"), Settings.log_file),
         rate_limit=int(env.get("ASSIST_RATE_LIMIT", Settings.rate_limit)),
         rate_window_s=int(env.get("ASSIST_RATE_WINDOW_S", Settings.rate_window_s)),
+        database_url=env.get("ASSIST_DATABASE_URL") or None,
+        embed=env.get("ASSIST_EMBED", Settings.embed),
+        embed_model=env.get("ASSIST_EMBED_MODEL") or None,
+        embed_url=env.get("ASSIST_EMBED_URL") or Settings.embed_url,
+        embed_threads=int(env.get("ASSIST_EMBED_THREADS", Settings.embed_threads)),
+        top_k=int(env.get("ASSIST_TOP_K", Settings.top_k)),
+        refresh_days=float(env.get("ASSIST_REFRESH_DAYS", Settings.refresh_days)),
+        refresh_cooldown_min=float(env.get("ASSIST_REFRESH_COOLDOWN_MIN", Settings.refresh_cooldown_min)),
+        refresh_check_s=int(env.get("ASSIST_REFRESH_CHECK_S", Settings.refresh_check_s)),
     )

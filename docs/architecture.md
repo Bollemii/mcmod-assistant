@@ -119,8 +119,11 @@ données relationnelles et filtres dans une seule requête SQL. Détail dans
   (phase 2).
 - Prompt système stable ; le contexte RAG et la question viennent après (ce qui
   permet la mise en cache du prompt chez les fournisseurs qui la proposent).
-- Le modèle d'embeddings est choisi à part (multilingue, bon en français ; par exemple
-  `bge-m3` en local, 1024 dimensions, ou les embeddings de l'API Gemini). Choix à confirmer.
+- Le modèle d'embeddings est choisi à part : `bge-m3` servi par **Ollama en local**
+  (Docker), multilingue, 1024 dimensions, sans quota. Les embeddings de Gemini ont été
+  écartés : le palier gratuit est limité à 1 000 textes par jour, soit à peine un
+  chargement complet du wiki.
+  `bge-m3` en local via Ollama reste possible (`ASSIST_EMBED=openai`), sans quota.
 - Sur le palier gratuit de Gemini, Google peut utiliser les questions pour améliorer
   ses produits : à mentionner aux joueurs si le module est diffusé.
 
@@ -184,16 +187,48 @@ Réponse `200` :
 }
 ```
 
-En phase 1, `sources` est toujours vide : il sera rempli par le RAG (phase 2).
+`sources` : les extraits que le LLM dit avoir utilisés (ligne finale `SOURCES: 1, 3`
+de sa réponse, retirée du texte), 3 au plus. Si aucun extrait n'est cité, le lien du
+wiki du serveur. `query_id` : identifiant de la ligne de `queries`.
 
 Erreurs, toutes au format `{"error": "…"}` : `401` (jeton manquant ou invalide),
 `422` (question vide ou de plus de 256 caractères), `429` (limite atteinte, en-tête
 `Retry-After`), `503` (LLM indisponible). Le client affiche un message court dans tous
-les cas.
+les cas. Une panne des embeddings ou de la base ne fait pas échouer la question :
+recherche en plein texte seul, ou réponse sans extraits.
+
+### `POST /v1/refresh`
+
+Mise à jour légère des sources du serveur (`/assist maj`, `/assist maj force`).
+
+```json
+{"server": "play.excalia.fr", "force": false}
+```
+
+Réponse `200` (attend au plus 60 s ; au-delà, la mise à jour continue en tâche de fond
+et la source est indiquée `running`) :
+
+```json
+{"server": "excalia", "sources": [
+  {"source": "wiki", "status": "done", "added": 0, "changed": 2, "removed": 0,
+   "unchanged": 126, "embedded": 5, "refreshed_at": "2026-11-06T10:42:00+00:00"},
+  {"source": "patch_notes", "status": "recent", "refreshed_at": "2026-11-06T10:15:00+00:00",
+   "retry_after_s": 1980}
+]}
+```
+
+`status` : `done`, `recent` (mise à jour il y a moins d'une heure, rien n'est relancé),
+`running` ou `error`. `force` demande un jeton admin (`403` sinon) ; `404` pour un
+serveur inconnu ; `503` sans base.
+
+### `GET /v1/sources?server=play.excalia.fr`
+
+Jeton admin. État de chaque source : `documents`, `chunks`, `refreshed_at`,
+`refresh_days`, `next_refresh`, `running`.
 
 ### `GET /v1/health`
 
-`{"status": "ok"}` : vérifie que l'API tourne.
+`{"status": "ok", "rag": true}` : l'API tourne ; `rag` indique si une base est configurée.
 
 ### `POST /v1/feedback`
 
@@ -234,5 +269,4 @@ les cas.
 - **Version de Minecraft** : le serveur est en **26.2** (« Chaos Cubed », 16/06/2026).
   À surveiller : 26.3 est déjà sortie, il faudra suivre les montées de version
   du serveur (build ChatTriggers, recettes, fichiers de langue).
-- **Modèle d'embeddings** : local (`bge-m3`) ou via une API.
 - **Hébergement** du serveur assistant.

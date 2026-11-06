@@ -41,7 +41,8 @@ function load(scenario) {
                 const b = {
                     timeout() { return b; },
                     header(k, v) { req.headers[k] = v; return b; },
-                    POST(body) { req.body = body; return b; },
+                    POST(body) { req.method = "POST"; req.body = body; return b; },
+                    GET() { req.method = "GET"; return b; },
                     build: () => req,
                 };
                 return b;
@@ -124,6 +125,50 @@ const tests = {
         assert.match(m.chat.at(-1), /injoignable/);
         m.run("assist", "encore");
         assert.strictEqual(m.sent.length, 2);  // « pending » a bien été remis à zéro
+    },
+    "/assist maj : envoie la demande et affiche le bilan par source": () => {
+        const m = load({ config: { token: "t" }, response: { status: 200, body: { server: "excalia", sources: [
+            { source: "wiki", status: "done", added: 2, changed: 1, removed: 0 },
+            { source: "patch_notes", status: "recent", refreshed_at: "2026-11-06T09:30:00+00:00", retry_after_s: 1500 },
+        ] } } });
+        m.run("assist", "MAJ");
+        const req = m.sent[0];
+        assert.strictEqual(req.uri, "http://127.0.0.1:8000/v1/refresh");
+        assert.deepStrictEqual(JSON.parse(req.body), { server: "play.excalia.fr", force: false });
+        assert.match(m.chat.at(-2), /Wiki : .*mis à jour .*2 nouvelles pages, 1 modifiée, 0 supprimée/);
+        assert.match(m.chat.at(-1), /Notes de patch : .*déjà mis à jour le 06\/11.*dans 25 min/);
+    },
+    "/assist maj force : demande forcée, refusée sans jeton admin": () => {
+        const m = load({ config: { token: "t" }, response: { status: 403, body: { error: "réservé" } } });
+        m.run("assist", "maj", "force");
+        assert.deepStrictEqual(JSON.parse(m.sent[0].body), { server: "play.excalia.fr", force: true });
+        assert.match(m.chat.at(-1), /réservée aux jetons admin/);
+    },
+    "/assist maj sans changement, en cours, en échec, sans base": () => {
+        const m = load({ config: { token: "t" }, response: { status: 200, body: { sources: [
+            { source: "wiki", status: "done", added: 0, changed: 0, removed: 0 },
+            { source: "patch_notes", status: "running" }, { source: "autre", status: "error" }] } } });
+        m.run("assist", "maj");
+        assert.match(m.chat.at(-3), /aucun changement/);
+        assert.match(m.chat.at(-2), /en cours/);
+        assert.match(m.chat.at(-1), /autre : .*échec/);
+        const down = load({ config: { token: "t" }, response: { status: 503, body: { error: "Pas de base." } } });
+        down.run("assist", "maj");
+        assert.match(down.chat.at(-1), /indisponible.*503.*Pas de base/);
+    },
+    "/assist sources : requête GET et état de chaque source": () => {
+        const m = load({ config: { token: "t" }, response: { status: 200, body: { sources: [
+            { source: "wiki", documents: 128, chunks: 818, refreshed_at: "2026-11-06T09:30:00+00:00",
+              next_refresh: "2026-11-13T09:30:00+00:00", running: false }] } } });
+        m.run("assist", "sources");
+        assert.strictEqual(m.sent[0].method, "GET");
+        assert.strictEqual(m.sent[0].uri, "http://127.0.0.1:8000/v1/sources?server=play.excalia.fr");
+        assert.match(m.chat.at(-1), /Wiki : .*128 pages, 818 extraits, mis à jour le 06\/11.*prochaine le 13\/11/);
+    },
+    "une question qui commence par « maj » reste une question": () => {
+        const m = load({ config: { token: "t" }, response: OK });
+        m.run("assist", "maj", "de", "mon", "île", "?");
+        assert.strictEqual(m.sent[0].uri, "http://127.0.0.1:8000/v1/ask");
     },
     "refuse une question vide ou trop longue": () => {
         const m = load({ config: { token: "t" }, response: OK });

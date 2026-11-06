@@ -4,10 +4,13 @@ Le palier gratuit couvre les modèles Flash et Flash-Lite, avec des quotas par m
 par jour (visibles dans AI Studio). Attention : sur le palier gratuit, Google peut
 utiliser les questions envoyées pour améliorer ses produits.
 """
+from typing import Sequence
+
 from google import genai
 from google.genai import errors, types
 
-from ..llm import REFUSAL_TEXT, SYSTEM_PROMPT, Answer, LLMUnavailable, build_user_message
+from ..llm import REFUSAL_TEXT, SYSTEM_PROMPT, Answer, LLMUnavailable, build_user_message, finish
+from ..retrieval import ContextChunk
 from ..servers import ServerInfo
 from ..settings import Settings
 
@@ -45,11 +48,12 @@ class GeminiAnswerer:
                 raise LLMUnavailable(f"client Gemini impossible à créer (GEMINI_API_KEY définie ?) : {e}") from e
         return self._client
 
-    async def answer(self, question: str, server: ServerInfo | None, mc_version: str | None) -> Answer:
+    async def answer(self, question: str, server: ServerInfo | None, mc_version: str | None,
+                     context: Sequence[ContextChunk] = ()) -> Answer:
         model = self.settings.model_name
         try:
             response = await self.client.aio.models.generate_content(
-                model=model, contents=build_user_message(question, server, mc_version), config=self.config)
+                model=model, contents=build_user_message(question, server, mc_version, context), config=self.config)
         except errors.APIError as e:   # 429 (quota du palier gratuit atteint), 5xx, clé invalide…
             raise LLMUnavailable(f"Gemini {e.code} : {e.message}") from e
 
@@ -58,12 +62,12 @@ class GeminiAnswerer:
                   "output_tokens": ((usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0))
                   if usage else 0}
         blocked_prompt = response.prompt_feedback and response.prompt_feedback.block_reason
-        finish = response.candidates[0].finish_reason if response.candidates else None
-        if blocked_prompt or finish in BLOCKED:
+        finish_reason = response.candidates[0].finish_reason if response.candidates else None
+        if blocked_prompt or finish_reason in BLOCKED:
             return Answer(REFUSAL_TEXT, model, refused=True, **tokens)
 
         parts = response.candidates[0].content.parts if response.candidates and response.candidates[0].content else []
-        text = " ".join(p.text.strip() for p in parts or [] if p.text and not p.thought).strip()
+        text = "\n".join(p.text.strip() for p in parts or [] if p.text and not p.thought).strip()
         if not text:
-            raise LLMUnavailable(f"réponse vide (finish_reason={finish})")
-        return Answer(text, response.model_version or model, **tokens)
+            raise LLMUnavailable(f"réponse vide (finish_reason={finish_reason})")
+        return finish(text, response.model_version or model, **tokens)

@@ -25,7 +25,7 @@ class FakeAnswerer:
     def __init__(self, fail=False):
         self.calls, self.fail = [], fail
 
-    async def answer(self, question, server, mc_version):
+    async def answer(self, question, server, mc_version, context=()):
         self.calls.append((question, server, mc_version))
         if self.fail:
             raise LLMUnavailable("panne simulée")
@@ -47,14 +47,15 @@ class ApiTest(unittest.TestCase):
         return self.client.post("/v1/ask", json=body, headers=headers)
 
     def test_health(self):
-        self.assertEqual(self.client.get("/v1/health").json(), {"status": "ok"})
+        self.assertEqual(self.client.get("/v1/health").json(), {"status": "ok", "rag": False})
 
     def test_answer_and_log(self):
         r = self.ask(server="Play.Excalia.fr:25565", mc_version="26.2")
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertEqual(body["answer"], "Huit pierres taillées autour d'une case vide.")
-        self.assertEqual(body["sources"], [])
+        # Sans base ni extrait cité : lien vers le wiki du serveur.
+        self.assertEqual(body["sources"], [{"title": "Wiki Excalia", "url": "https://excalia.fr/wiki"}])
         question, server, version = self.answerer.calls[0]
         self.assertEqual((question, server.slug, version), ("Comment craft un four ?", "excalia", "26.2"))
         line = json.loads(self.settings.log_file.read_text("utf8").splitlines()[0])
@@ -93,7 +94,7 @@ class ApiTest(unittest.TestCase):
         client = TestClient(create_app(replace(self.settings, llm="fake")))
         r = client.post("/v1/ask", json={"question": "four ?", "server": "play.excalia.fr"},
                         headers={"Authorization": f"Bearer {self.token}"})
-        self.assertEqual(r.json()["answer"], "(mode test) Question bien reçue pour Excalia, Minecraft ? : four ?")
+        self.assertEqual(r.json()["answer"], "(mode test) Question bien reçue pour Excalia, Minecraft ?, 0 extraits : four ?")
 
     def test_llm_unavailable(self):
         client = TestClient(create_app(self.settings, FakeAnswerer(fail=True)))

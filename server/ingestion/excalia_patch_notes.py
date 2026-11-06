@@ -43,6 +43,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--server", default="excalia")
     ap.add_argument("--all-seasons", action="store_true")
+    ap.add_argument("--refetch", action="store_true", help="retélécharger toutes les notes, même déjà connues")
     args = ap.parse_args()
 
     server = load_server(args.server)
@@ -59,7 +60,7 @@ def main():
     for slug, entry in entries.items():
         raw_path = raw_dir / f"{slug}.json"
         cached = json.loads(raw_path.read_text("utf8")) if raw_path.exists() else None
-        stale = cached is None or (entry and (entry.get("publishedAt"), entry.get("excerpt"))
+        stale = args.refetch or cached is None or (entry and (entry.get("publishedAt"), entry.get("excerpt"))
                                    != (cached.get("publishedAt"), cached.get("excerpt")))
         if stale:
             note = get_json(f"{conf['api']}/{slug}")["patchNote"]

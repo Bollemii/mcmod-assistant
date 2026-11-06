@@ -24,6 +24,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--server", default="excalia")
     ap.add_argument("--from-file", help="relire une réponse d'API enregistrée au lieu d'appeler l'API")
+    ap.add_argument("--refetch", action="store_true", help="sans effet : l'API renvoie toujours tout le wiki")
     args = ap.parse_args()
 
     server = load_server(args.server)

@@ -4,9 +4,12 @@ Exemples de configuration :
 - Ollama en local, gratuit : ASSIST_OPENAI_BASE_URL=http://127.0.0.1:11434/v1, ASSIST_MODEL=<modèle installé>
 - Mistral, Groq, OpenRouter… : leur URL d'API, ASSIST_OPENAI_API_KEY, ASSIST_MODEL
 """
+from typing import Sequence
+
 import httpx
 
-from ..llm import REFUSAL_TEXT, SYSTEM_PROMPT, Answer, LLMUnavailable, build_user_message
+from ..llm import REFUSAL_TEXT, SYSTEM_PROMPT, Answer, LLMUnavailable, build_user_message, finish
+from ..retrieval import ContextChunk
 from ..servers import ServerInfo
 from ..settings import Settings
 
@@ -20,14 +23,15 @@ class OpenAICompatAnswerer:
         self.client = client or httpx.AsyncClient(timeout=settings.llm_timeout_s, headers=headers)
         self.url = settings.openai_base_url.rstrip("/") + "/chat/completions"
 
-    async def answer(self, question: str, server: ServerInfo | None, mc_version: str | None) -> Answer:
+    async def answer(self, question: str, server: ServerInfo | None, mc_version: str | None,
+                     context: Sequence[ContextChunk] = ()) -> Answer:
         model = self.settings.model_name
         payload = {
             "model": model,
             "max_tokens": self.settings.max_tokens,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_message(question, server, mc_version)},
+                {"role": "user", "content": build_user_message(question, server, mc_version, context)},
             ],
         }
         try:
@@ -45,4 +49,4 @@ class OpenAICompatAnswerer:
         text = ((choice.get("message") or {}).get("content") or "").strip()
         if not text:
             raise LLMUnavailable(f"réponse vide (finish_reason={choice.get('finish_reason')})")
-        return Answer(text, data.get("model") or model, **tokens)
+        return finish(text, data.get("model") or model, **tokens)

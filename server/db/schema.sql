@@ -68,6 +68,7 @@ CREATE TABLE sources (
                                                 -- 50 wiki Minecraft, 10 Q/R du chat
   lang          text NOT NULL DEFAULT 'fr',
   active        boolean NOT NULL DEFAULT true,
+  refreshed_at  timestamptz,                    -- dernière mise à jour réussie (rythme hebdomadaire, /assist maj)
   UNIQUE NULLS NOT DISTINCT (kind, server_id, config_key, season)
 );
 
@@ -95,7 +96,8 @@ CREATE TABLE chunks (
   confidence    real NOT NULL DEFAULT 1.0,      -- < 1 pour les Q/R du chat
   embedding     vector(1024) NOT NULL,          -- dimension du modèle d'embeddings choisi
   embed_model   text NOT NULL,                  -- pour réindexer si on change de modèle
-  tsv           tsvector GENERATED ALWAYS AS (
+  text_hash     text NOT NULL,                  -- empreinte du texte embeddé : un chunk inchangé garde son vecteur
+  tsv          tsvector GENERATED ALWAYS AS (
                   setweight(to_tsvector('french', f_unaccent(f_join(heading_path))), 'A') ||
                   setweight(to_tsvector('french', f_unaccent(content)), 'B')
                 ) STORED,
@@ -106,6 +108,7 @@ CREATE INDEX chunks_embedding_idx ON chunks USING hnsw (embedding vector_cosine_
 CREATE INDEX chunks_tsv_idx       ON chunks USING gin (tsv);
 CREATE INDEX chunks_versions_idx  ON chunks USING gist (versions);
 CREATE INDEX chunks_document_idx  ON chunks (document_id);
+CREATE INDEX chunks_text_hash_idx ON chunks (embed_model, text_hash);
 
 -- ---------------------------------------------------------------------------
 -- Données structurées : items et recettes

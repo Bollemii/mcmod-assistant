@@ -45,7 +45,27 @@ Le jeton est fourni par la personne qui fait tourner le serveur assistant
   sans figer le jeu.
 - Une seule question à la fois. Au-delà de 10 questions par minute, l'API demande
   d'attendre.
-- À partir de la phase 2, les sources s'afficheront sous la réponse, cliquables.
+- Les pages du wiki ou les notes de patch utilisées s'affichent sous la réponse,
+  cliquables. Si l'assistant ne sait pas, il renvoie vers le wiki du serveur.
+
+### Mettre à jour le wiki
+
+```
+/assist maj
+```
+
+Relance la mise à jour du wiki et des notes de patch du serveur, puis affiche le bilan
+(pages nouvelles, modifiées, supprimées). Le wiki est de toute façon mis à jour
+automatiquement chaque semaine. Une même source n'est mise à jour qu'une fois par heure
+au plus, tous joueurs confondus : sinon, la commande indique la date de la dernière
+mise à jour.
+
+Avec un jeton **admin** :
+
+| Commande | Effet |
+|---|---|
+| `/assist maj force` | mise à jour complète, sans délai minimal |
+| `/assist sources` | nombre de pages, date de la dernière et de la prochaine mise à jour |
 
 ## Tests hors du jeu
 

@@ -1,0 +1,39 @@
+# Base de l'assistant (PostgreSQL 17 + pgvector) et Ollama (embeddings en local).
+#
+#   docker compose up -d        (depuis le dossier server/)
+#
+# Au premier démarrage (volume vide), db/schema.sql est appliqué automatiquement.
+# Pour repartir de zéro : docker compose down -v
+services:
+  db:
+    image: pgvector/pgvector:0.8.0-pg17
+    environment:
+      POSTGRES_USER: assist
+      POSTGRES_PASSWORD: assist
+      POSTGRES_DB: assist
+    ports:
+      - "127.0.0.1:5433:5432"     # 5433 : ne gêne pas un PostgreSQL déjà installé
+    volumes:
+      - assist-db:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assist -d assist"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Embeddings (bge-m3) et LLM de développement, en local : aucun quota, aucun coût.
+  # Premier lancement : docker compose exec ollama ollama pull bge-m3
+  ollama:
+    image: ollama/ollama:0.40.8
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1"           # garde bge-m3 en mémoire : pas de rechargement de ~10 s par question
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama     # modèles téléchargés, conservés entre deux lancements
+    restart: unless-stopped
+
+volumes:
+  assist-db:
+  ollama-models:

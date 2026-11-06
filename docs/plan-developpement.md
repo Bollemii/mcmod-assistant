@@ -8,7 +8,7 @@ critère de fin vérifiable.
 |---|---|---|
 | 0 | Fondations : arborescence, ingestion Excalia (wiki + notes de patch), multi-serveur, confiance | ✅ terminé |
 | 1 | Chaîne de bout en bout minimale (sans RAG) | ✅ terminé (testé en jeu avec Gemini) |
-| 2 | RAG sur le contenu Excalia + jeu d'évaluation | à faire |
+| 2 | RAG sur le contenu Excalia + jeu d'évaluation | code ✅, évaluation des réponses à faire |
 | 3 | Connaissances Minecraft vanilla (wiki + recettes) | à faire |
 | 4 | Apprentissage autonome à partir du chat | à faire |
 | 5 | Qualité, coûts et exploitation | à faire |
@@ -76,28 +76,37 @@ moins de 5 s, et le jeu ne se fige pas pendant l'attente.
 
 Objectif : des réponses fondées sur le wiki et les notes de patch, avec leurs sources.
 
-- [ ] PostgreSQL + pgvector en local (`docker-compose.yml`), avec application de `schema.sql`.
-- [ ] Choix du modèle d'embeddings (multilingue, bon en français) et test sur
-      une dizaine de questions.
-- [ ] Chargeur `servers.toml` → `servers`, `server_addresses`, `sources`, `chat_roles`.
-- [ ] Chargeur `chunks.jsonl` → base, incrémental (seulement les pages nouvelles ou
-      modifiées, suppression des pages disparues), pour le wiki et les notes de patch.
-- [ ] Recherche hybride (vecteurs + plein texte, fusion RRF, filtres).
-- [ ] Prompt RAG : répondre uniquement à partir du contexte, dire « je ne sais pas »
-      sinon, citer la source, réponse en 2 à 4 phrases, préférer l'information datée
-      la plus récente (note de patch contre wiki).
-- [ ] Réponse de l'API avec `sources`. Le client affiche un lien cliquable vers le wiki.
-- [ ] Journalisation dans `queries`.
-- [ ] **Jeu d'évaluation** : environ 50 questions avec réponse attendue, construites
-      à partir de la FAQ du wiki (`s3-faq`, déjà rédigée sous forme de questions
-      et réponses) et de questions réelles.
-- [ ] Script d'évaluation, qui mesure :
+- [x] PostgreSQL + pgvector et Ollama en local (`docker-compose.yml`), `schema.sql`
+      appliqué au premier démarrage.
+- [x] Modèle d'embeddings : **`bge-m3` via Ollama**, en local (multilingue, 1024
+      dimensions, sans quota). Les embeddings Gemini ont été écartés : leur palier
+      gratuit est limité à 1 000 textes par jour, soit à peine un chargement du wiki.
+- [x] Chargeur `servers.toml` → `servers`, `server_addresses`, `sources`, `chat_roles`
+      ([`db/load.py`](../server/db/load.py)).
+- [x] Chargeur `chunks.jsonl` → base, incrémental (pages nouvelles, modifiées ou
+      disparues), qui réutilise le vecteur de tout texte inchangé (`text_hash`).
+- [x] Recherche hybride ([`retrieval.py`](../server/api/retrieval.py)) : vecteurs + plein
+      texte pondéré par la rareté des mots (IDF), fusion RRF, filtres serveur / saison /
+      expiration, 3 extraits au plus par page. Si les embeddings sont indisponibles,
+      plein texte seul.
+- [x] Prompt RAG : extraits numérotés et datés, « je ne sais pas » sinon, 1 à 4 phrases,
+      note de patch la plus récente prioritaire, ligne finale `SOURCES: 1, 3`.
+- [x] Réponse de l'API avec `sources` (pages citées, sinon le wiki) ; liens cliquables
+      dans le client.
+- [x] Journalisation dans `queries` (en plus de `queries.jsonl`).
+- [x] **Jeu d'évaluation** ([`eval/excalia.jsonl`](../server/eval/excalia.jsonl)) :
+      55 questions écrites comme un joueur (30 de la FAQ, 15 d'autres pages du wiki,
+      6 de notes de patch, 4 hors sujet ou sans réponse, 1 tentative de détournement).
+- [x] Script d'évaluation ([`eval/run_eval.py`](../server/eval/run_eval.py)), qui mesure :
   - la bonne source dans le top 8 (*recall@8*) ;
   - la justesse de la réponse ;
   - la latence ;
   - le coût par question.
+- [ ] **Évaluation des réponses** (justesse, latence, coût) : à lancer avec l'accord du
+      propriétaire, car elle fait ~110 appels au LLM (voir [AGENTS.md](../AGENTS.md)).
 - [ ] Réglage de l'effort du LLM (`low` par défaut) et, si besoin, comparaison avec
       un modèle moins cher, **à partir des mesures**.
+
 ### Mise à jour des sources
 
 Les wikis des serveurs et les notes de patch sont mis à jour de façon **légère** :
@@ -105,8 +114,8 @@ seules les pages nouvelles, modifiées ou supprimées sont traitées. Le wiki Ex
 tient en un seul appel à `/api/wiki`, et les notes de patch déjà connues ne sont pas
 retéléchargées. Les embeddings ne sont recalculés que pour les pages modifiées.
 
-- [ ] Date de dernière mise à jour par source (colonne `refreshed_at` dans `sources`).
-- [ ] **Mise à jour automatique hebdomadaire** : au démarrage de l'API, puis toutes les
+- [x] Date de dernière mise à jour par source (colonne `refreshed_at` dans `sources`).
+- [x] **Mise à jour automatique hebdomadaire** : au démarrage de l'API, puis toutes les
       heures, chaque source dont la dernière mise à jour date de plus de `refresh_days`
       jours est relancée en tâche de fond.
   - Paramétrable par source dans `servers.toml` (`refresh_days = 7`), avec une valeur
@@ -114,26 +123,37 @@ retéléchargées. Les embeddings ne sont recalculés que pour les pages modifi�
     mise à jour automatique.
   - Le **wiki Minecraft** est exclu : il est volumineux et ne change qu'avec la version
     du jeu. Il est mis à jour à la main, lors d'une montée de version (phase 3).
-- [ ] **Mise à jour à la demande par les joueurs** : `/assist maj` relance la mise à jour
+- [x] **Mise à jour à la demande par les joueurs** : `/assist maj` relance la mise à jour
       légère des sources du serveur où se trouve le joueur.
   - Délai minimal entre deux mises à jour d'une même source, commun à tous les joueurs
     (`ASSIST_REFRESH_COOLDOWN_MIN=60`). Pendant ce délai, la commande indique la date
     de la dernière mise à jour au lieu de la relancer.
   - Réponse en jeu : « mise à jour lancée », puis le bilan (pages ajoutées, modifiées,
     supprimées).
-- [ ] **Deux types de jetons** :
+- [x] **Deux types de jetons** :
 
   | Type | Commandes |
   |---|---|
-  | `joueur` | `/assist <question>`, notes 👍 / 👎, `/assist maj` (soumis au délai) |
-  | `admin` | tout ce que fait `joueur`, plus `/assist maj force` (sans délai, reconstruction complète d'une source), `/assist sources` (état et date de chaque source), et les commandes d'administration de la phase 4 (épingler / bannir un fait) |
+  | `joueur` | `/assist <question>`, `/assist maj` (soumis au délai) ; plus tard les notes 👍 / 👎 (phase 5) |
+  | `admin` | tout ce que fait `joueur`, plus `/assist maj force` (sans délai, tout est retéléchargé et rechargé), `/assist sources` (état et date de chaque source), et plus tard les commandes d'administration de la phase 4 (épingler / bannir un fait) |
 
   Le type est une colonne de `tokens.txt` (`joueur` par défaut, ce qui garde les jetons
   actuels valides) ; création par `python -m api.tokens new --admin "Pseudo"`. L'API
   répond `403` à une commande avancée envoyée avec un jeton `joueur`.
 
+**Mesures de la recherche** (06/11/2026, 51 questions avec source attendue, sans LLM) :
+
+| Mode | Bonne page en 1ʳᵉ position | dans le top 3 | dans le top 8 | Temps (médiane) |
+|---|---|---|---|---|
+| Hybride, `bge-m3` (Ollama) + plein texte IDF | **92 %** | **100 %** | **100 %** | 65 ms |
+| Plein texte seul, pondéré IDF (si Ollama est arrêté) | 78 % | 88 % | 94 % | 18 ms |
+| Plein texte seul, sans IDF (première version) | 39 % | 57 % | 80 % | 9 ms |
+
+Ollama doit tourner avec 8 threads (`ASSIST_EMBED_THREADS`) : avec les 14 par défaut,
+l'embedding d'une question prend 3 s au lieu de 0,04 s.
+
 **Critère de fin** : au moins 80 % de réponses justes sur le jeu d'évaluation, la
-bonne source dans le top 8 pour au moins 90 % des questions, et « je ne sais pas »
+bonne source dans le top 8 pour au moins 90 % des questions (✅ 100 %), et « je ne sais pas »
 plutôt qu'une invention sur les questions hors sujet.
 
 ## Phase 3 — Connaissances Minecraft vanilla
@@ -225,6 +245,7 @@ phase 2, et moins de 5 % des faits actifs contrôlés à la main sont faux.
 
 ## Prochaine étape
 
-Phase 2, en commençant par **PostgreSQL + pgvector en local** et le **choix du modèle
-d'embeddings** : tout le reste de la phase (chargeur, recherche, mise à jour des sources)
-en dépend. Les deux types de jetons peuvent être faits dès maintenant, indépendamment.
+Fin de la phase 2 : **évaluer la justesse des réponses** (`python -m eval.run_eval`).
+Elle demande ~110 appels au LLM (une réponse et un jugement par question) : à lancer
+avec l'accord du propriétaire, sur Gemini ou sur un LLM local servi par Ollama
+(voir [AGENTS.md](../AGENTS.md)). Puis un essai en jeu de `/assist` et `/assist maj`.
