@@ -1,0 +1,46 @@
+# Serveurs Minecraft pris en charge par l'assistant.
+#
+# Chaque serveur a sa propre section [<slug>] : ses sources spécifiques, sa version
+# de Minecraft et ses règles de confiance pour le chat. Les sources communes
+# (wiki Minecraft, données du jeu) ne sont pas déclarées ici : elles sont partagées
+# par tous les serveurs d'une même version de Minecraft.
+#
+# Données produites : server/data/servers/<slug>/<source>/
+
+[excalia]
+name = "Excalia"
+# Adresses envoyées par le client (/assist transmet l'adresse du serveur).
+addresses = ["play.excalia.fr", "excalia.fr"]
+mc_version = "26.2"
+season = "saison3"
+wiki_url = "https://excalia.fr/wiki"     # renvoyé aux joueurs quand l'assistant ne sait pas
+description = "serveur Skyblock français, saison 3 au thème spatial"
+
+[excalia.sources.wiki]
+kind = "server_wiki"
+api = "https://excalia.fr/api/wiki"
+wiki_key = "saison3"           # clé du wiki dans la réponse de l'API
+priority = 100
+
+[excalia.sources.patch_notes]
+kind = "server_news"
+api = "https://excalia.fr/api/patch-notes"
+sitemap = "https://excalia.fr/sitemap.xml"   # l'API ne liste que les 20 dernières notes
+public_url = "https://excalia.fr/patch-notes/"
+version_prefix = "3."          # notes de la saison 3 seulement (3.0, 3.5.1…)
+priority = 90
+
+# --- Confiance accordée aux auteurs du chat (voir docs/confiance-chat.md) ---------
+[excalia.chat.roles]
+# rôle = confiance de base (0 à 1). Le rôle est lu dans le préfixe du message.
+admin = 0.95
+moderateur = 0.9
+guide = 0.85
+joueur = 0.3
+
+[excalia.chat.role_prefixes]
+# Expression régulière (sur la ligne de chat) -> rôle. À ajuster sur des logs réels :
+# le format exact des préfixes d'Excalia n'est pas encore relevé.
+'^\[(Admin|Fondateur|Développeur)\]' = "admin"
+'^\[(Modo|Modérateur|Modératrice)\]' = "moderateur"
+'^\[(Guide|Helper)\]' = "guide"

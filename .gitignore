@@ -1,0 +1,14 @@
+# Données produites et journaux
+server/data/
+
+# Secrets
+server/config/tokens.txt
+.env
+
+# Configuration locale du module (contient le jeton du joueur)
+client/assist/config.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/

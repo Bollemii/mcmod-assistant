@@ -1,0 +1,230 @@
+# Plan de développement
+
+Principe : **obtenir une chaîne complète au plus tôt**, puis l'enrichir source par
+source en mesurant la qualité à chaque étape. Chaque phase se termine par un
+critère de fin vérifiable.
+
+| Phase | Objectif | État |
+|---|---|---|
+| 0 | Fondations : arborescence, ingestion Excalia (wiki + notes de patch), multi-serveur, confiance | ✅ terminé |
+| 1 | Chaîne de bout en bout minimale (sans RAG) | ✅ terminé (testé en jeu avec Gemini) |
+| 2 | RAG sur le contenu Excalia + jeu d'évaluation | à faire |
+| 3 | Connaissances Minecraft vanilla (wiki + recettes) | à faire |
+| 4 | Apprentissage autonome à partir du chat | à faire |
+| 5 | Qualité, coûts et exploitation | à faire |
+
+---
+
+## Phase 0 — Fondations ✅
+
+- [x] Architecture validée ([architecture.md](architecture.md)).
+- [x] Arborescence du projet (`docs/`, `server/`, `client/`).
+- [x] Ingestion du wiki Excalia via `GET /api/wiki`
+      ([`excalia_wiki.py`](../server/ingestion/excalia_wiki.py)) : 128 pages,
+      818 chunks (avec le texte alternatif des images), détection des changements par hash.
+- [x] Ingestion des notes de patch Excalia via `/api/patch-notes`
+      ([`excalia_patch_notes.py`](../server/ingestion/excalia_patch_notes.py)) : liste
+      API + sitemap (29 notes), 10 notes de la saison 3, 132 chunks datés.
+- [x] Découpage HTML partagé ([`html_chunker.py`](../server/ingestion/html_chunker.py)).
+- [x] Multi-serveur : configuration par serveur ([`servers.toml`](../server/config/servers.toml)),
+      données rangées par serveur, règle « `server_id NULL` = commun » dans le schéma.
+- [x] Schéma de base prévu et testé sur PostgreSQL + pgvector
+      ([schema-donnees.md](schema-donnees.md), [`schema.sql`](../server/db/schema.sql)).
+- [x] Système de confiance du chat conçu ([confiance-chat.md](confiance-chat.md)) et
+      calcul implémenté avec 17 scénarios testés ([`trust.py`](../server/qa/trust.py)).
+
+## Phase 1 — Chaîne de bout en bout minimale ✅
+
+Objectif : une question tapée en jeu reçoit une réponse du LLM, sans RAG pour l'instant.
+Cette phase lève les risques d'installation côté client avant d'investir dans le reste.
+
+**Bilan de l'essai en jeu** : tout fonctionne avec Gemini. L'assistant répond
+correctement et renvoie vers le wiki quand il ne sait pas répondre précisément.
+
+- [x] **Vérifier le client** : le launcher Excalia utilise Fabric par défaut, et on peut
+      y ajouter ChatTriggers (`ctjs`) directement. Aucun autre launcher n'est nécessaire.
+      Procédure : [client/README.md](../client/README.md).
+- [x] **Vérifier le règlement** d'Excalia : le module n'enfreint aucune clause et il est
+      **validé par le staff**.
+- [x] Module ChatTriggers [`client/assist/`](../client/assist/index.js) :
+  - [x] commande `/assist <question>`, et `/assistconfig url|token|show` ;
+  - [x] appel HTTP **asynchrone** (`java.net.http` dans un thread, affichage renvoyé sur
+        le thread du jeu par `Client.scheduleTask`) ;
+  - [x] message d'attente, réponse, sources cliquables (prêtes pour la phase 2), un
+        message clair par code d'erreur (401, 422, 429, 503, serveur injoignable) ;
+  - [x] configuration (URL de l'API, jeton) dans `config.json` ;
+  - [x] 7 tests de la logique sous Node, avec des doublures de ChatTriggers
+        ([`run_module.js`](../client/tests/run_module.js)).
+- [x] API [`server/api/`](../server/api/main.py) : `POST /v1/ask` qui appelle un LLM
+      au choix (Gemini par défaut, gratuit ; Claude ; toute API compatible OpenAI comme
+      Ollama), `GET /v1/health`,
+      jeton par joueur (empreintes seulement, `python -m api.tokens new`), limite de
+      10 questions par minute, reconnaissance du serveur par son adresse, journal des
+      questions (`data/logs/queries.jsonl`), mode factice sans clé (`ASSIST_LLM=fake`).
+      25 tests, plus un essai HTTP réel en mode factice et une vérification des requêtes
+      réelles des SDK Gemini et Claude contre un faux serveur local.
+- [x] [`server/requirements.txt`](../server/requirements.txt) et instructions de
+      lancement ([server/README.md](../server/README.md)).
+- [x] Configuration par `server/.env` (modèle : `.env.example`, ignoré par git).
+- [x] Premier appel réel à Gemini avec une clé gratuite (`GEMINI_API_KEY` dans `server/.env`), et mesure
+      de la latence.
+
+**Critère de fin** : `/assist Comment créer mon île ?` affiche une réponse en jeu en
+moins de 5 s, et le jeu ne se fige pas pendant l'attente.
+
+## Phase 2 — RAG sur le contenu Excalia
+
+Objectif : des réponses fondées sur le wiki et les notes de patch, avec leurs sources.
+
+- [ ] PostgreSQL + pgvector en local (`docker-compose.yml`), avec application de `schema.sql`.
+- [ ] Choix du modèle d'embeddings (multilingue, bon en français) et test sur
+      une dizaine de questions.
+- [ ] Chargeur `servers.toml` → `servers`, `server_addresses`, `sources`, `chat_roles`.
+- [ ] Chargeur `chunks.jsonl` → base, incrémental (seulement les pages nouvelles ou
+      modifiées, suppression des pages disparues), pour le wiki et les notes de patch.
+- [ ] Recherche hybride (vecteurs + plein texte, fusion RRF, filtres).
+- [ ] Prompt RAG : répondre uniquement à partir du contexte, dire « je ne sais pas »
+      sinon, citer la source, réponse en 2 à 4 phrases, préférer l'information datée
+      la plus récente (note de patch contre wiki).
+- [ ] Réponse de l'API avec `sources`. Le client affiche un lien cliquable vers le wiki.
+- [ ] Journalisation dans `queries`.
+- [ ] **Jeu d'évaluation** : environ 50 questions avec réponse attendue, construites
+      à partir de la FAQ du wiki (`s3-faq`, déjà rédigée sous forme de questions
+      et réponses) et de questions réelles.
+- [ ] Script d'évaluation, qui mesure :
+  - la bonne source dans le top 8 (*recall@8*) ;
+  - la justesse de la réponse ;
+  - la latence ;
+  - le coût par question.
+- [ ] Réglage de l'effort du LLM (`low` par défaut) et, si besoin, comparaison avec
+      un modèle moins cher, **à partir des mesures**.
+### Mise à jour des sources
+
+Les wikis des serveurs et les notes de patch sont mis à jour de façon **légère** :
+seules les pages nouvelles, modifiées ou supprimées sont traitées. Le wiki Excalia
+tient en un seul appel à `/api/wiki`, et les notes de patch déjà connues ne sont pas
+retéléchargées. Les embeddings ne sont recalculés que pour les pages modifiées.
+
+- [ ] Date de dernière mise à jour par source (colonne `refreshed_at` dans `sources`).
+- [ ] **Mise à jour automatique hebdomadaire** : au démarrage de l'API, puis toutes les
+      heures, chaque source dont la dernière mise à jour date de plus de `refresh_days`
+      jours est relancée en tâche de fond.
+  - Paramétrable par source dans `servers.toml` (`refresh_days = 7`), avec une valeur
+    par défaut globale (`ASSIST_REFRESH_DAYS=7`). `refresh_days = 0` désactive la
+    mise à jour automatique.
+  - Le **wiki Minecraft** est exclu : il est volumineux et ne change qu'avec la version
+    du jeu. Il est mis à jour à la main, lors d'une montée de version (phase 3).
+- [ ] **Mise à jour à la demande par les joueurs** : `/assist maj` relance la mise à jour
+      légère des sources du serveur où se trouve le joueur.
+  - Délai minimal entre deux mises à jour d'une même source, commun à tous les joueurs
+    (`ASSIST_REFRESH_COOLDOWN_MIN=60`). Pendant ce délai, la commande indique la date
+    de la dernière mise à jour au lieu de la relancer.
+  - Réponse en jeu : « mise à jour lancée », puis le bilan (pages ajoutées, modifiées,
+    supprimées).
+- [ ] **Deux types de jetons** :
+
+  | Type | Commandes |
+  |---|---|
+  | `joueur` | `/assist <question>`, notes 👍 / 👎, `/assist maj` (soumis au délai) |
+  | `admin` | tout ce que fait `joueur`, plus `/assist maj force` (sans délai, reconstruction complète d'une source), `/assist sources` (état et date de chaque source), et les commandes d'administration de la phase 4 (épingler / bannir un fait) |
+
+  Le type est une colonne de `tokens.txt` (`joueur` par défaut, ce qui garde les jetons
+  actuels valides) ; création par `python -m api.tokens new --admin "Pseudo"`. L'API
+  répond `403` à une commande avancée envoyée avec un jeton `joueur`.
+
+**Critère de fin** : au moins 80 % de réponses justes sur le jeu d'évaluation, la
+bonne source dans le top 8 pour au moins 90 % des questions, et « je ne sais pas »
+plutôt qu'une invention sur les questions hors sujet.
+
+## Phase 3 — Connaissances Minecraft vanilla
+
+Objectif : répondre aux questions de jeu de base (crafts, mécaniques), en laissant
+la priorité aux règles du serveur.
+
+- [x] Version de Minecraft du serveur : **26.2**.
+- [ ] Lire la data version de 26.2 (`version.json` du jar, champ `world_version`)
+      et l'ajouter dans `mc_versions`.
+- [ ] Extraction depuis le jar client 26.2 (37 Mo, téléchargé depuis les serveurs de Mojang) :
+  - [ ] recettes (`data/minecraft/recipe/*.json`) → `items`, `recipes` ;
+  - [ ] fichiers de langue `fr_fr.json` / `en_us.json` → `item_aliases`.
+- [ ] Détection d'entités dans la question (alias → item → recettes) et injection des
+      recettes dans le prompt.
+- [ ] Ingestion du wiki Minecraft FR via l'API MediaWiki, en se limitant aux pages
+      utiles (items, blocs, mécaniques). Respect de la licence CC BY-NC-SA : source
+      citée dans les réponses.
+- [ ] Gestion des conflits serveur / vanilla : priorités, recettes `disabled`,
+      consigne explicite dans le prompt.
+- [ ] Ajout de questions vanilla et de questions piège (recette modifiée par
+      Excalia) au jeu d'évaluation.
+
+**Critère de fin** : `/assist Comment craft un four ?` renvoie la recette exacte, et
+une question sur un item modifié par Excalia renvoie la version du serveur.
+
+## Phase 4 — Apprentissage autonome à partir du chat
+
+Objectif : enrichir la base avec les réponses que les joueurs se donnent entre eux,
+**sans validation humaine obligatoire**, sans y faire entrer d'erreurs. Conception :
+[confiance-chat.md](confiance-chat.md).
+
+- [ ] Choisir la méthode de collecte :
+  - **logs client** (`logs/latest.log`, `logs/*.log.gz`) : historique déjà disponible ;
+  - **capture en direct** avec ChatTriggers (`register("chat", …)`) : format plus
+    propre, mais seulement à partir de maintenant.
+- [ ] Relever le format réel du chat d'Excalia et ajuster `role_prefixes` dans
+      `servers.toml` (préfixes admin, modérateur, guide).
+- [ ] Analyseur du chat : canaux publics seulement (MP exclus), rôle lu dans le préfixe,
+      **pseudonymisation** (HMAC), écriture dans `players` et `chat_messages`.
+- [ ] Extraction hors ligne par le LLM : question canonique, réponse canonique,
+      position (soutient / contredit), certitude.
+- [ ] Regroupement : rattacher chaque occurrence à un fait existant (question et
+      réponse proches) ou en créer un, dans le bon `question_group`.
+- [ ] Tâche de maintenance horaire : calcul de confiance ([`trust.py`](../server/qa/trust.py)),
+      vérification officielle par le LLM, changements de statut, mise à jour des
+      réputations, indexation ou retrait des faits actifs (source `chat_qa`).
+- [ ] Revérification des faits actifs à chaque nouvelle note de patch proche.
+- [ ] Prise en compte des 👍 / 👎 de `/assist` sur les faits utilisés (`queries.fact_ids`).
+- [ ] Outil d'administration facultatif : épingler / bannir un fait, forcer un rôle,
+      bannir un auteur.
+- [ ] Calibrage des seuils sur des données réelles (part de faits activés, erreurs
+      constatées).
+- [ ] Rapport des questions fréquentes sans bonne réponse, à remonter à l'équipe
+      Excalia pour compléter le wiki.
+
+**Critère de fin** : les faits activés automatiquement améliorent le score sur un lot
+de questions issues du chat, sans faire baisser le score du jeu d'évaluation de la
+phase 2, et moins de 5 % des faits actifs contrôlés à la main sont faux.
+
+## Phase 5 — Qualité, coûts et exploitation
+
+- [ ] Cache sémantique : resservir une réponse récente à une question quasi identique.
+- [ ] Retours joueurs `/assist bien` / `/assist faux`, puis revue des réponses notées 👎.
+- [ ] Limite de débit par joueur et budget mensuel LLM, avec une alerte.
+- [ ] Prompt caching du prompt système, vérifié via `cache_read_input_tokens`.
+- [ ] Suivi : latence, coût par question, taux de « je ne sais pas », taux d'erreur.
+- [ ] Hébergement du serveur assistant (petite VM ou conteneur) et sauvegarde de la base.
+- [ ] Distribution du module (procédure d'installation, `/ct import` si publié).
+- [ ] Changement de saison : mise à jour de `season` dans `servers.toml` ; les sources
+      et les faits de l'ancienne saison sortent automatiquement de la recherche.
+- [ ] Ajout d'un deuxième serveur, pour valider le fonctionnement multi-serveur.
+
+---
+
+## Risques
+
+| Risque | Impact | Parade |
+|---|---|---|
+| ~~Le launcher Excalia n'accepte pas Fabric + ChatTriggers~~ | — | **Levé** : le launcher utilise Fabric par défaut et accepte `ctjs`. |
+| ~~Le module est jugé non conforme au règlement~~ | — | **Levé** : validé par le staff. À reconfirmer si le module gagne des fonctions qui agissent en jeu. |
+| Abus de `/assist maj` (relances en boucle) | Charge sur le site Excalia | Délai minimal par source commun à tous, mise à jour légère, reconstruction complète réservée aux jetons `admin`. |
+| Les routes `/api/wiki` ou `/api/patch-notes` changent ou disparaissent | Ingestion cassée | Garder les réponses brutes (`wiki_raw.json`, `raw/`) comme dernière copie connue. Le site expose aussi un sitemap et des pages HTML exploitables. |
+| La saison 3 est « en préparation », le wiki va beaucoup bouger | Réponses obsolètes | Mise à jour légère hebdomadaire (paramétrable) et à la demande avec `/assist maj`, chunks d'une page modifiée remplacés, date de mise à jour affichée. |
+| Les Q/R du chat sont fausses ou périmées | Mauvaises réponses | Système de confiance : une voix par auteur, rôles, réputation, vérification officielle, priorité basse, expiration. |
+| Manipulation du chat (plusieurs comptes qui répètent une fausse réponse) | Fait faux activé | Confiance faible des joueurs (6 auteurs distincts nécessaires), rejet si une source officielle contredit, 👎 des joueurs, bannissement d'auteurs. |
+| Coût du LLM si le module est diffusé largement | Budget dépassé | Gemini gratuit par défaut, jeton par joueur, limite de débit, cache, effort `low`, budget avec alerte en cas de fournisseur payant. |
+| Quotas du palier gratuit Gemini dépassés | Réponses en 503 aux heures chargées | Cache sémantique (phase 5), modèle Flash-Lite (quota plus haut), bascule vers Ollama en local ou un palier payant. |
+
+## Prochaine étape
+
+Phase 2, en commençant par **PostgreSQL + pgvector en local** et le **choix du modèle
+d'embeddings** : tout le reste de la phase (chargeur, recherche, mise à jour des sources)
+en dépend. Les deux types de jetons peuvent être faits dès maintenant, indépendamment.

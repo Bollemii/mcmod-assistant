@@ -1,0 +1,8 @@
+{
+  "name": "assist",
+  "version": "0.1.0",
+  "entry": "index.js",
+  "creator": "mcmod-assistant",
+  "description": "Assistant IA en jeu : /assist <question>. Les réponses viennent du serveur mcmod-assistant.",
+  "tags": ["utility", "assistant"]
+}
