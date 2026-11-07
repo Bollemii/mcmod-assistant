@@ -165,6 +165,14 @@ const tests = {
         assert.strictEqual(m.sent[0].uri, "http://127.0.0.1:8000/v1/sources?server=play.excalia.fr");
         assert.match(m.chat.at(-1), /Wiki : .*128 pages, 818 extraits, mis à jour le 06\/11.*prochaine le 13\/11/);
     },
+    "signale une réponse du mode allégé": () => {
+        const m = load({ config: { token: "t" }, response: { status: 200, body: Object.assign({}, OK.body, { degraded: true }) } });
+        m.run("assist", "question");
+        assert.match(m.chat.at(-2), /mode allégé/);
+        const normal = load({ config: { token: "t" }, response: OK });
+        normal.run("assist", "question");
+        assert.ok(!normal.chat.some(l => /mode allégé/.test(l)));
+    },
     "une question qui commence par « maj » reste une question": () => {
         const m = load({ config: { token: "t" }, response: OK });
         m.run("assist", "maj", "de", "mon", "île", "?");

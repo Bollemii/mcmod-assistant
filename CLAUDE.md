@@ -27,7 +27,7 @@ le vrai service. Un agent ne doit **jamais** les appeler de lui-même.
 | Besoin | À utiliser | Réglage |
 |---|---|---|
 | Embeddings | **Ollama en Docker** (`bge-m3`, 1024 dimensions) | `ASSIST_EMBED=ollama` (défaut) |
-| LLM | **Ollama en Docker** (modèle local) ou réponses factices | `ASSIST_LLM=openai` + `ASSIST_OPENAI_BASE_URL=http://127.0.0.1:11434/v1`, ou `ASSIST_LLM=fake` |
+| LLM | **Ollama en Docker** (`gemma3:4b`) ou réponses factices | `ASSIST_LLM=ollama`, ou `ASSIST_LLM=fake` |
 | Tests unitaires | doublures (`fake`) | aucun réseau |
 
 - `docker compose up -d` (dans `server/`) lance PostgreSQL + pgvector et Ollama.

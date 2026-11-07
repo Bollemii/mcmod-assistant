@@ -17,6 +17,7 @@ DEFAULT_MODELS = {
     "gemini": "gemini-3.5-flash-lite",   # gratuit (palier gratuit de l'API Gemini), rapide
     "claude": "claude-opus-5-5",         # API Claude : facturée à l'usage, hors abonnement Pro
     "openai": None,                      # API compatible OpenAI : modèle à préciser
+    "ollama": "gemma3:4b",               # local (Docker), sur processeur : mode allégé
     "fake": "fake",
 }
 
@@ -47,6 +48,16 @@ class Settings:
     rate_limit: int = 10                # questions max par joueur…
     rate_window_s: int = 60             # …sur cette fenêtre glissante
     max_question_chars: int = 256       # limite du chat Minecraft
+
+    # --- Mode allégé : LLM local (Ollama) quand le fournisseur principal est indisponible ---
+    fallback_llm: str | None = "ollama" # "" : pas de mode allégé (erreur 503 comme avant)
+    ollama_model: str = "gemma3:4b"
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_threads: int = 8             # comme les embeddings : trop de threads ralentit sous Docker
+    ollama_timeout_s: float = 120.0     # ~20 à 30 s par réponse sur processeur, plus l'attente d'une autre
+    light_top_k: int = 4                # extraits donnés au mode allégé…
+    light_extract_chars: int = 700      # …tronqués à cette longueur (prompt ~1 500 tokens au lieu de ~4 000)
+    fallback_cooldown_s: int = 60       # après une panne du principal, mode allégé direct pendant ce délai
 
     # --- RAG (phase 2) ---
     # Base PostgreSQL + pgvector (docker-compose.yml). Vide : pas de RAG, l'API répond
@@ -104,6 +115,12 @@ def from_env(env_file: Path = ENV_FILE) -> Settings:
         log_file=_path(env.get("ASSIST_LOG_FILE"), Settings.log_file),
         rate_limit=int(env.get("ASSIST_RATE_LIMIT", Settings.rate_limit)),
         rate_window_s=int(env.get("ASSIST_RATE_WINDOW_S", Settings.rate_window_s)),
+        fallback_llm=env.get("ASSIST_FALLBACK_LLM", Settings.fallback_llm) or None,
+        ollama_model=env.get("ASSIST_OLLAMA_MODEL", Settings.ollama_model),
+        ollama_url=env.get("ASSIST_OLLAMA_URL", Settings.ollama_url),
+        ollama_threads=int(env.get("ASSIST_OLLAMA_THREADS", Settings.ollama_threads)),
+        light_top_k=int(env.get("ASSIST_LIGHT_TOP_K", Settings.light_top_k)),
+        light_extract_chars=int(env.get("ASSIST_LIGHT_EXTRACT_CHARS", Settings.light_extract_chars)),
         database_url=env.get("ASSIST_DATABASE_URL") or None,
         embed=env.get("ASSIST_EMBED", Settings.embed),
         embed_model=env.get("ASSIST_EMBED_MODEL") or None,

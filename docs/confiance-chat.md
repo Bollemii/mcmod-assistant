@@ -36,16 +36,21 @@ des faits touchés depuis le dernier passage, puis applique les changements de s
 Chaque serveur déclare ses rôles et leur confiance de base dans
 [`servers.toml`](../server/config/servers.toml) :
 
-| Rôle | Confiance de base | Détection |
+| Rôle | Confiance de base | Grades Excalia |
 |---|---|---|
-| `admin` | 0,95 | préfixe du message, ex. `[Admin]` |
-| `moderateur` | 0,90 | ex. `[Modo]` |
-| `guide` | 0,85 | ex. `[Guide]` |
-| `joueur` | 0,30 | par défaut |
+| `admin` | 0,95 | Admin, Responsable |
+| `moderateur` | 0,90 | Modérateur++, Modérateur+, Modérateur |
+| `guide` | 0,85 | Guide |
+| `staff` | 0,70 | Builder, Développeur (staff hors modération) |
+| `joueur` | 0,30 | Citoyen, VIP, MVP, MVP+, Héros, Vidéaste ; par défaut |
 
-- Le rôle est lu dans le **préfixe de grade** de chaque message, avec les expressions
-  régulières de `[<serveur>.chat.role_prefixes]`. Le format exact des préfixes
-  d'Excalia reste à relever sur de vrais logs.
+- Le grade est lu dans le **symbole placé devant le pseudo** (un caractère de la
+  police du pack de ressources, par exemple `ॐ Lorn87: …` pour un Admin), avec la
+  table `[<serveur>.chat.grades]`. Celle d'Excalia a été relevée le 07/11/2026 sur
+  26 logs de chat, croisés avec `/api/online-players-s3` (grades joueurs) et les rôles
+  du staff donnés par le propriétaire. Un symbole inconnu compte comme `joueur`.
+- Les grades payants (VIP à Héros) ne donnent **aucune** confiance de plus : ils ne
+  disent rien de la connaissance du jeu.
 - Un rôle peut être **forcé à la main** (`role_source = 'manual'`), par exemple pour
   un joueur reconnu comme expert. Un rôle manuel n'est jamais écrasé par le préfixe.
 - Un auteur peut être **banni** (troll) : sa confiance tombe à 0.

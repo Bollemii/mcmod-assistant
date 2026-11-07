@@ -27,7 +27,7 @@ import numpy as np
 import psycopg
 from psycopg.types.json import Jsonb
 
-from api.db import connect
+from api.db import connect, migrate
 from api.embeddings import Embedder, make_embedder, text_hash
 from api.settings import SERVER_DIR, Settings, from_env
 
@@ -170,6 +170,7 @@ def main(argv: list[str] | None = None) -> None:
     servers = read_servers(settings.servers_file)
     embedder = make_embedder(settings)
     with connect(settings.database_url) as conn:
+        migrate(conn)
         sync_config(conn, servers)
         for slug, conf in servers.items():
             if args.server and slug != args.server:

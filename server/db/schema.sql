@@ -248,11 +248,14 @@ CREATE TABLE queries (
   question     text NOT NULL,
   q_embedding  vector(1024),
   answer       text,
-  chunk_ids    bigint[],                        -- contexte donné au LLM
+  chunk_ids    bigint[],                        -- contexte donné au LLM (ids : changent si la base est rechargée)
+  chunk_keys   text[],                          -- même contexte, en clés stables (chunks.chunk_key)
   recipe_ids   bigint[],
   fact_ids     bigint[],                        -- faits du chat utilisés (un 👎 les pénalise)
   model        text,
-  latency_ms   int,
+  latency_ms   int,                             -- total : recherche + LLM
+  search_ms    int,                             -- recherche (embedding de la question + SQL)
+  llm_ms       int,                             -- appel au LLM ; NULL si le LLM n'a pas été appelé
   feedback     smallint CHECK (feedback IN (-1, 1)),
   created_at   timestamptz NOT NULL DEFAULT now()
 );

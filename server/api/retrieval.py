@@ -32,6 +32,7 @@ class ContextChunk:
     published_at: datetime | None
     score: float = 0.0
     ranks: dict = field(default_factory=dict)
+    key: str = ""                # chunk_key : stable d'un rechargement à l'autre, contrairement à id
 
     @property
     def section(self) -> str:
@@ -82,7 +83,7 @@ fused AS (
   GROUP BY id
 )
 SELECT c.id, c.url, d.title, c.heading_path, c.content, s.kind::text, d.published_at, d.id,
-       f.score, f.vec_rank, f.fts_rank
+       f.score, f.vec_rank, f.fts_rank, c.chunk_key
 FROM fused f
 JOIN chunks c ON c.id = f.id
 JOIN documents d ON d.id = c.document_id
@@ -101,12 +102,12 @@ def search(conn: psycopg.Connection, question: str, query_vec: list[float] | Non
     rows = conn.execute(SEARCH_SQL, {"server": server, "text": question, "vec": vec,
                                      "n": CANDIDATES, "k": RRF_K}).fetchall()
     results, per_doc = [], {}
-    for cid, url, title, path, content, kind, published, doc_id, score, vrank, frank in rows:
+    for cid, url, title, path, content, kind, published, doc_id, score, vrank, frank, key in rows:
         if per_doc.get(doc_id, 0) >= max_per_doc:
             continue
         per_doc[doc_id] = per_doc.get(doc_id, 0) + 1
         results.append(ContextChunk(cid, url, title, list(path), content, kind, published, float(score),
-                                    {"vec": vrank, "fts": frank}))
+                                    {"vec": vrank, "fts": frank}, key))
         if len(results) >= top_k:
             break
     return results

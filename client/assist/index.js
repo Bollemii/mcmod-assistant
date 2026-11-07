@@ -22,6 +22,7 @@ const MODULE = "assist";            // nom du dossier du module (pour FileLib)
 const CONFIG_FILE = "config.json";
 const PREFIX = "&b[Assist] &r";
 const MAX_QUESTION = 256;           // limite de l'API, comme le chat Minecraft
+const ASK_TIMEOUT_S = 90;           // le mode allégé (LLM local) met 20 à 30 s, plus qu'avec Gemini
 const DEFAULT_CONFIG = { apiUrl: "http://127.0.0.1:8000", token: "" };
 
 const http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -66,6 +67,10 @@ function line(message) {
 function answerLines(data) {
     // La réponse est passée en objet { text } pour ne pas interpréter d'éventuels « & ».
     const lines = [new TextComponent(PREFIX, { text: String(data.answer), color: "white" })];
+    if (data.degraded) {
+        // Gemini indisponible : réponse du LLM local, plus courte et moins complète.
+        lines.push(line("&8&o(mode allégé : réponse moins complète, le wiki fait foi)"));
+    }
     (data.sources || []).forEach(source => {
         lines.push(new TextComponent({
             text: "  ↳ " + source.title,
@@ -233,7 +238,7 @@ function ask(question) {
         server: Server.getIP() || null,
         mc_version: minecraftVersion(),
         lang: "fr",
-    }, 30, linesForResponse);
+    }, ASK_TIMEOUT_S, linesForResponse);
 }
 
 function refresh(force) {

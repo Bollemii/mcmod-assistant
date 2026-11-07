@@ -23,6 +23,7 @@ Docker suffit :
 ```bash
 docker compose up -d
 docker compose exec ollama ollama pull bge-m3      # une seule fois (1,2 Go)
+docker compose exec ollama ollama pull gemma3:4b   # mode allégé (3,4 Go)
 ```
 
 - PostgreSQL 17 + pgvector écoute sur `127.0.0.1:5433` ; le schéma (`db/schema.sql`)
@@ -76,7 +77,23 @@ Le fournisseur se choisit avec `ASSIST_LLM` dans `.env`.
 | `gemini` (défaut) | **gratuit** dans les quotas du palier gratuit | `GEMINI_API_KEY`, à créer sur [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | `gemini-3.5-flash-lite` |
 | `claude` | facturé à l'usage : l'API Claude **n'est pas incluse** dans l'abonnement Pro | `ANTHROPIC_API_KEY` | `claude-opus-5-5` |
 | `openai` | selon le service ; **gratuit en local avec Ollama** | `ASSIST_OPENAI_API_KEY` si le service en demande une | à préciser avec `ASSIST_MODEL` |
+| `ollama` | **gratuit, en local** (Docker) | aucune | `gemma3:4b`, sur processeur : ~20 à 30 s par réponse |
 | `fake` | gratuit | aucune | réponses factices, pour tester le client |
+
+### Mode allégé
+
+Quand le fournisseur principal ne répond pas (quota Gemini atteint, panne, réseau), la
+question part vers **Ollama en local** (`gemma3:4b`) au lieu d'une erreur 503 :
+
+- prompt plus court (4 extraits de 700 caractères au lieu de 8 de 1 500, consignes
+  résumées), car sur processeur le temps dépend surtout de la longueur du prompt ;
+- réponse en ~20 à 30 s, un peu moins complète ; le joueur voit « mode allégé » ;
+- après une panne, Gemini est laissé de côté un moment (le délai indiqué par Gemini
+  pour un quota par minute, 1 h pour le quota du jour, 60 s sinon), puis réessayé.
+
+Mesuré le 07/11/2026 sur 10 questions : `gemma3:4b` 9 justes, `ministral-3:3b` 6
+(et du Markdown), `qwen3:4b` inutilisable (raisonne en anglais). Le prompt complet
+reste celui de Gemini. `ASSIST_FALLBACK_LLM=` (vide) désactive le mode allégé.
 
 **Gemini** : sur le palier gratuit, les quotas (questions par minute et par jour) sont
 affichés dans AI Studio, et Google peut utiliser les questions envoyées pour améliorer
@@ -110,6 +127,10 @@ Le même réglage marche pour Mistral, Groq ou OpenRouter : leur URL d'API dans
 | `ASSIST_LOG_FILE` | `data/logs/queries.jsonl` | Journal des questions (aussi enregistrées dans la table `queries`) |
 | `ASSIST_DATABASE_URL` | — | Base PostgreSQL + pgvector ; vide = pas de RAG |
 | `ASSIST_EMBED` / `ASSIST_EMBED_MODEL` | `ollama` / `bge-m3` | Embeddings : `ollama` (local), `gemini`, `openai` (autre API compatible) ou `fake` |
+| `ASSIST_FALLBACK_LLM` | `ollama` | Mode allégé ; vide = aucun (503 quand le principal échoue) |
+| `ASSIST_OLLAMA_MODEL` / `ASSIST_OLLAMA_URL` | `gemma3:4b` / `http://127.0.0.1:11434` | LLM local |
+| `ASSIST_OLLAMA_THREADS` | `8` | Threads du LLM local (même remarque que pour les embeddings) |
+| `ASSIST_LIGHT_TOP_K` / `ASSIST_LIGHT_EXTRACT_CHARS` | `4` / `700` | Prompt du mode allégé |
 | `ASSIST_EMBED_URL` | `http://127.0.0.1:11434/v1` | Adresse de l'API d'embeddings (`ollama` / `openai`) |
 | `ASSIST_EMBED_THREADS` | `8` | Threads de calcul d'Ollama. Tous les cœurs (défaut d'Ollama) est bien plus lent sous Docker : 3 s par question au lieu de 0,04 s sur une machine à 14 cœurs |
 | `ASSIST_TOP_K` | `8` | Extraits donnés au LLM (3 au plus par page) |
@@ -198,7 +219,7 @@ python -m eval.run_eval                      # recherche, réponse et jugement p
 
 L'évaluation complète fait deux appels au LLM par question (réponse et jugement), soit
 ~110 appels : sur Gemini, elle consomme le quota du vrai service. Voir
-[AGENTS.md](../AGENTS.md).
+[CLAUDE.md](../CLAUDE.md).
 
 ## Tests
 

@@ -55,7 +55,9 @@ class GeminiAnswerer:
             response = await self.client.aio.models.generate_content(
                 model=model, contents=build_user_message(question, server, mc_version, context), config=self.config)
         except errors.APIError as e:   # 429 (quota du palier gratuit atteint), 5xx, clé invalide…
-            raise LLMUnavailable(f"Gemini {e.code} : {e.message}") from e
+            # str(e) garde le détail du quota (QuotaFailure, « retry in 35s ») : la bascule
+            # vers le mode allégé s'en sert pour savoir combien de temps laisser Gemini de côté.
+            raise LLMUnavailable(f"Gemini {e.code} : {e}") from e
 
         usage = response.usage_metadata
         tokens = {"input_tokens": (usage.prompt_token_count or 0) if usage else 0,

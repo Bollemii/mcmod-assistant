@@ -118,13 +118,20 @@ class OpenAICompatTest(unittest.TestCase):
 
 
 class FactoryTest(unittest.TestCase):
-    def test_default_is_gemini(self):
+    def test_default_is_gemini_with_light_mode(self):
+        from api.fallback import FallbackAnswerer
+        from api.providers.ollama import OllamaAnswerer
         self.assertEqual(Settings().llm, "gemini")
-        self.assertIsInstance(make_answerer(Settings()), GeminiAnswerer)   # sans clé : créé quand même
+        answerer = make_answerer(Settings())             # sans clé : créé quand même
+        self.assertIsInstance(answerer, FallbackAnswerer)
+        self.assertIsInstance(answerer.primary, GeminiAnswerer)
+        self.assertIsInstance(answerer.fallback, OllamaAnswerer)
+        self.assertIsInstance(make_answerer(Settings(fallback_llm=None)), GeminiAnswerer)
+        self.assertIsInstance(make_answerer(Settings(llm="ollama")), OllamaAnswerer)   # tout en local
 
     def test_choices(self):
         self.assertIsInstance(make_answerer(Settings(llm="fake")), FakeAnswerer)
-        self.assertEqual(type(make_answerer(Settings(llm="claude"))).__name__, "ClaudeAnswerer")
+        self.assertEqual(type(make_answerer(Settings(llm="claude", fallback_llm=None))).__name__, "ClaudeAnswerer")
         self.assertEqual(Settings(llm="claude").model_name, "claude-opus-5-5")
         with self.assertRaises(ValueError):
             make_answerer(Settings(llm="inconnu"))

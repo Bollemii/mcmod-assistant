@@ -194,8 +194,11 @@ wiki du serveur. `query_id` : identifiant de la ligne de `queries`.
 Erreurs, toutes au format `{"error": "…"}` : `401` (jeton manquant ou invalide),
 `422` (question vide ou de plus de 256 caractères), `429` (limite atteinte, en-tête
 `Retry-After`), `503` (LLM indisponible). Le client affiche un message court dans tous
-les cas. Une panne des embeddings ou de la base ne fait pas échouer la question :
-recherche en plein texte seul, ou réponse sans extraits.
+les cas. Une panne d'Ollama ne fait pas échouer la question (recherche en plein texte seul).
+Si Gemini échoue (quota, panne), la question passe en **mode allégé** : LLM local
+(Ollama, `gemma3:4b`), prompt plus court, ~20 à 30 s, champ `"degraded": true` dans la
+réponse. Si la base est injoignable, le LLM n'est **pas** appelé : la réponse renvoie vers le
+wiki, plutôt que de laisser le LLM inventer des règles du serveur.
 
 ### `POST /v1/refresh`
 

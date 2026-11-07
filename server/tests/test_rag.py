@@ -153,6 +153,38 @@ class TokensTest(unittest.TestCase):
             tokens.create(path, "x", "modo")
 
 
+class DatabaseDownTest(unittest.TestCase):
+    """Base configurée mais injoignable (Docker arrêté) : pas d'appel au LLM, renvoi vers le wiki."""
+
+    def test_offline_answer_without_llm(self):
+        class BrokenPool:
+            def connection(self, timeout=None):
+                raise ConnectionError("connection refused")
+
+        class CountingAnswerer:
+            calls = 0
+
+            async def answer(self, *args, **kwargs):
+                CountingAnswerer.calls += 1
+                return Answer("réponse inventée", "llm")
+
+        tmp = Path(tempfile.mkdtemp())
+        settings = replace(Settings(llm="fake"), tokens_file=tmp / "t.txt", log_file=tmp / "q.jsonl",
+                           refresh_check_s=0)
+        token = tokens.create(settings.tokens_file, "Joueur")
+        client = TestClient(create_app(settings, CountingAnswerer(), embedder=FakeEmbedder(), pool=BrokenPool()))
+        r = client.post("/v1/ask", json={"question": "cuire plus vite ?", "server": "play.excalia.fr"},
+                        headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertIn("pas accès au wiki", body["answer"])
+        self.assertEqual(body["sources"], [{"title": "Wiki Excalia", "url": "https://excalia.fr/wiki"}])
+        self.assertEqual(CountingAnswerer.calls, 0)
+        line = json.loads(settings.log_file.read_text("utf8"))
+        self.assertIsNone(line["llm_ms"])
+        self.assertGreaterEqual(line["search_ms"], 0)
+
+
 class RightsWithoutDatabaseTest(unittest.TestCase):
     def setUp(self):
         tmp = Path(tempfile.mkdtemp())

@@ -208,6 +208,21 @@ class RagDatabaseTest(unittest.TestCase):
                                 "FROM queries WHERE id = %s", (int(body["query_id"]),)).fetchone()
         self.assertEqual(row, ("comment poser mon premier spawner", "Au palier 2, avec /is upgrade.",
                                len(answerer.context), True))
+        keys, search_ms, llm_ms, latency = self.conn.execute(
+            "SELECT chunk_keys, search_ms, llm_ms, latency_ms FROM queries WHERE id = %s",
+            (int(body["query_id"]),)).fetchone()
+        self.assertEqual(keys[0], "excalia:wiki:ile0")          # clé stable, survit à un rechargement
+        self.assertTrue(0 <= search_ms <= latency and 0 <= llm_ms <= latency)
+
+    def test_migration_on_old_database(self):
+        self.conn.execute("ALTER TABLE queries DROP COLUMN chunk_keys, DROP COLUMN search_ms, DROP COLUMN llm_ms")
+        self.conn.commit()
+        from api.db import migrate
+        migrate(self.conn)
+        migrate(self.conn)                                       # idempotente
+        cols = {r[0] for r in self.conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'queries'")}
+        self.assertTrue({"chunk_keys", "search_ms", "llm_ms"} <= cols)
 
 
 if __name__ == "__main__":

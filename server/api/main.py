@@ -27,12 +27,19 @@ from . import tokens
 from .embeddings import Embedder, EmbeddingUnavailable, make_embedder
 from .llm import Answer, Answerer, LLMUnavailable, make_answerer
 from .ratelimit import RateLimiter
+from .db import migrate
 from .retrieval import ContextChunk, search
 from .servers import ServerInfo, ServerRegistry
 from .settings import Settings, from_env
 
 log = logging.getLogger("assist")
 MAX_SOURCES = 3
+DOCKER_HINT = "Docker est-il lancé ? (docker compose up -d dans server/)"
+# Base configurée mais injoignable : on ne laisse pas le LLM répondre de mémoire (il
+# inventerait des règles du serveur), on renvoie vers le wiki.
+OFFLINE_TEXT = ("Je n'ai pas accès au wiki du serveur pour le moment, je préfère ne pas répondre "
+                "de mémoire. Consulte le wiki ou réessaie dans quelques minutes.")
+OFFLINE_MODEL = "aucun (base injoignable)"
 
 
 class AskRequest(BaseModel):
@@ -52,6 +59,7 @@ class AskResponse(BaseModel):
     sources: list[Source] = []
     query_id: str
     cached: bool = False
+    degraded: bool = False             # réponse du mode allégé (LLM local), moins complète
 
 
 class RefreshRequest(BaseModel):
@@ -115,12 +123,17 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
                 await asyncio.to_thread(owned.wait, 5)
                 log.warning("Base : %s", settings.database_url.rsplit("@", 1)[-1])
             except Exception as e:   # la base peut démarrer après l'API : le pool réessaiera
-                log.warning("Base injoignable pour l'instant (%s) : réponses sans extraits en attendant.", e)
+                log.warning("Base injoignable pour l'instant (%s). %s En attendant, /assist renvoie vers le wiki.",
+                            e, DOCKER_HINT)
             setup_rag(owned)
             try:   # charge le modèle d'embeddings maintenant plutôt qu'à la première question
                 await asyncio.to_thread(app.state.embedder.embed_query, "préchauffage")
             except Exception as e:
-                log.warning("Embeddings indisponibles au démarrage (%s) : plein texte seul en attendant.", e)
+                log.warning("Embeddings indisponibles au démarrage (%s) : plein texte seul en attendant. %s",
+                            e, DOCKER_HINT)
+        if settings.fallback_llm == "ollama" and settings.llm != "fake":
+            # charge gemma3:4b en mémoire (~10 s) sans retarder le démarrage
+            app.state.warmup = asyncio.create_task(warm_up_ollama())
         loop_task = None
         if app.state.refresher and settings.refresh_check_s > 0:
             loop_task = asyncio.create_task(app.state.refresher.loop())
@@ -130,13 +143,22 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
         if owned:
             owned.close()
 
-    app = FastAPI(title="mcmod-assistant", version="0.2.0", lifespan=lifespan)
+    async def warm_up_ollama() -> None:
+        from .providers.ollama import OllamaAnswerer
+        try:
+            await OllamaAnswerer(settings).answer("préchauffage", None, None, [])
+            log.warning("Mode allégé prêt : %s (Ollama)", settings.ollama_model)
+        except Exception as e:
+            log.warning("Mode allégé indisponible (%s) : si Gemini échoue, /assist répondra 503. %s", e, DOCKER_HINT)
+
+    app = FastAPI(title="mcmod-assistant", version="0.3.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.answerer = answerer or make_answerer(settings)
     log.warning("LLM : %s, modèle %s", settings.llm, settings.model_name)
     app.state.servers = ServerRegistry(settings.servers_file)
     app.state.limiter = RateLimiter(settings.rate_limit, settings.rate_window_s)
     app.state.pool = app.state.embedder = app.state.refresher = None
+    app.state.migrated = False
     if pool is not None or not settings.database_url:
         setup_rag(pool)      # sinon : au démarrage (lifespan)
 
@@ -178,37 +200,44 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
 
     # --- Questions -------------------------------------------------------------------
 
-    def retrieve(question: str, server: ServerInfo | None) -> tuple[list[ContextChunk], list[float] | None]:
-        """Bloquant (thread). Toute panne (embeddings, base) dégrade sans faire échouer la question."""
+    def retrieve(question: str, server: ServerInfo | None) -> tuple[list[ContextChunk], list[float] | None, bool]:
+        """Bloquant (thread). Renvoie (extraits, vecteur de la question, base joignable).
+
+        Embeddings indisponibles : plein texte seul. Base injoignable : base joignable = False.
+        """
         if not app.state.pool:
-            return [], None
+            return [], None, True       # pas de base configurée : mode phase 1, assumé
         qvec = None
         try:
             qvec = app.state.embedder.embed_query(question)
         except EmbeddingUnavailable as e:
-            log.warning("Embeddings indisponibles, recherche plein texte seule : %s", e)
+            log.warning("Embeddings indisponibles, recherche plein texte seule : %s. %s", e, DOCKER_HINT)
         try:
             with app.state.pool.connection(timeout=5) as conn:
                 return search(conn, question, qvec, server.slug if server else None,
-                              settings.top_k, settings.max_chunks_per_doc), qvec
+                              settings.top_k, settings.max_chunks_per_doc), qvec, True
         except Exception as e:
-            log.warning("Recherche impossible, réponse sans extraits : %s", e)
-            return [], qvec
+            log.warning("Recherche impossible (%s). %s", e, DOCKER_HINT)
+            return [], qvec, False
 
     def log_query_db(server: ServerInfo | None, c: Caller, question: str, qvec, answer: Answer,
-                     context: list[ContextChunk], latency_ms: int) -> int | None:
+                     context: list[ContextChunk], timings: dict) -> int | None:
         if not app.state.pool:
             return None
         try:
             with app.state.pool.connection(timeout=5) as conn:
+                if not app.state.migrated:      # la base a pu démarrer après l'API
+                    migrate(conn)
+                    app.state.migrated = True
                 return conn.execute(
                     """INSERT INTO queries (server_id, player_hash, question, q_embedding, answer, chunk_ids,
-                                            model, latency_ms)
-                       VALUES ((SELECT id FROM servers WHERE slug = %s), %s, %s, %s, %s, %s, %s, %s)
+                                            chunk_keys, model, latency_ms, search_ms, llm_ms)
+                       VALUES ((SELECT id FROM servers WHERE slug = %s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        RETURNING id""",
                     (server.slug if server else None, c.hash[:16], question,
                      np.asarray(qvec, dtype=np.float32) if qvec is not None else None, answer.text,
-                     [x.id for x in context], answer.model, latency_ms)).fetchone()[0]
+                     [x.id for x in context], [x.key for x in context], answer.model,
+                     timings["latency_ms"], timings["search_ms"], timings["llm_ms"])).fetchone()[0]
         except Exception as e:
             log.warning("Journalisation de la question en base impossible : %s", e)
             return None
@@ -222,21 +251,28 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
 
         server = app.state.servers.find(req.server)
         started = time.perf_counter()
-        context, qvec = await asyncio.to_thread(retrieve, question, server)
-        try:
-            answer = await app.state.answerer.answer(question, server, req.mc_version, context)
-        except LLMUnavailable as e:
-            log.warning("LLM indisponible : %s", e)
-            raise HTTPException(503, "L'assistant est indisponible pour le moment.")
-        latency_ms = int((time.perf_counter() - started) * 1000)
+        context, qvec, reachable = await asyncio.to_thread(retrieve, question, server)
+        searched = time.perf_counter()
+        llm_ms = None
+        if reachable:
+            try:
+                answer = await app.state.answerer.answer(question, server, req.mc_version, context)
+            except LLMUnavailable as e:
+                log.warning("LLM indisponible : %s", e)
+                raise HTTPException(503, "L'assistant est indisponible pour le moment.")
+            llm_ms = int((time.perf_counter() - searched) * 1000)
+        else:
+            answer = Answer(OFFLINE_TEXT, OFFLINE_MODEL)
+        timings = {"latency_ms": int((time.perf_counter() - started) * 1000),
+                   "search_ms": int((searched - started) * 1000), "llm_ms": llm_ms}
         sources = make_sources(answer, context, server)
 
-        db_id = await asyncio.to_thread(log_query_db, server, c, question, qvec, answer, context, latency_ms)
+        db_id = await asyncio.to_thread(log_query_db, server, c, question, qvec, answer, context, timings)
         query_id = str(db_id) if db_id else uuid.uuid4().hex[:12]
         record = {"query_id": query_id, "at": datetime.now(timezone.utc).isoformat(),
                   "player": c.hash[:12], "server": server.slug if server else req.server,
                   "mc_version": req.mc_version, "question": question, "answer": answer.text,
-                  "refused": answer.refused, "model": answer.model, "latency_ms": latency_ms,
+                  "refused": answer.refused, "model": answer.model, "degraded": answer.degraded, **timings,
                   "input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
                   "chunks": [x.url for x in context], "cited": answer.cited,
                   "sources": [s.url for s in sources]}
@@ -244,7 +280,7 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
         with settings.log_file.open("a", encoding="utf8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        return AskResponse(answer=answer.text, sources=sources, query_id=query_id)
+        return AskResponse(answer=answer.text, sources=sources, query_id=query_id, degraded=answer.degraded)
 
     # --- Mise à jour des sources -----------------------------------------------------
 

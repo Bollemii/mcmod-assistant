@@ -43,15 +43,30 @@ priority = 90
 
 # --- Confiance accordée aux auteurs du chat (voir docs/confiance-chat.md) ---------
 [excalia.chat.roles]
-# rôle = confiance de base (0 à 1). Le rôle est lu dans le préfixe du message.
+# rôle = confiance de base (0 à 1).
 admin = 0.95
 moderateur = 0.9
 guide = 0.85
+staff = 0.7          # staff hors modération (builders, développeurs) : pas forcément experts du jeu
 joueur = 0.3
 
-[excalia.chat.role_prefixes]
-# Expression régulière (sur la ligne de chat) -> rôle. À ajuster sur des logs réels :
-# le format exact des préfixes d'Excalia n'est pas encore relevé.
-'^\[(Admin|Fondateur|Développeur)\]' = "admin"
-'^\[(Modo|Modérateur|Modératrice)\]' = "moderateur"
-'^\[(Guide|Helper)\]' = "guide"
+[excalia.chat.grades]
+# Symbole affiché devant le pseudo (police du pack de ressources) = [grade, rôle].
+# Relevé le 07/11/2026 : 26 logs de chat croisés avec /api/online-players-s3 pour les
+# grades joueurs (142 joueurs, 1 seul écart), rôles du staff donnés par le propriétaire.
+# Symbole absent de la liste = rôle « joueur ».
+"ॐ" = ["Admin", "admin"]                 # ॐ  Lorn87, Myrolame
+"꒒" = ["Responsable", "admin"]           # ꒒  N3colas, ElBoise, dqrkyy
+"꒐" = ["Modérateur++", "moderateur"]     # ꒐  jojolabaguette, Minisebcraft
+"꒤" = ["Modérateur+", "moderateur"]      # ꒤  BLUE9_, Poulet_Compote
+"꒎" = ["Modérateur", "moderateur"]       # ꒎  Brebis14, TimeeToDiee, fremmen
+"ꑯ" = ["Guide", "guide"]                 # ꑯ  TheDarkhy, Ouinze, kiki6874
+"ꒋ" = ["Builder", "staff"]               # ꒋ  Vicosio
+"ꒊ" = ["Développeur", "staff"]           # ꒊ  Haamtaro (à confirmer)
+"⧤" = ["Vidéaste", "joueur"]             # ⧤  Kalaary, MyrolameYT
+"" = ["Héros", "joueur"]
+"ꑹ" = ["MVP+", "joueur"]                 # ꑹ
+"ꑷ" = ["MVP", "joueur"]                  # ꑷ
+"ꑳ" = ["VIP", "joueur"]                  # ꑳ
+"ꒉ" = ["Citoyen", "joueur"]              # ꒉ
+# ꒔ (U+A494) : vu 17 fois chez Poulet_Compote (Modérateur+) le 13/10 seulement, rôle inconnu.

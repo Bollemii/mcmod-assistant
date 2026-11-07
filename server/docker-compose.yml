@@ -22,12 +22,13 @@ services:
       retries: 10
     restart: unless-stopped
 
-  # Embeddings (bge-m3) et LLM de développement, en local : aucun quota, aucun coût.
+  # Embeddings (bge-m3) et mode allégé (gemma3:4b), en local : aucun quota, aucun coût.
   # Premier lancement : docker compose exec ollama ollama pull bge-m3
+  #                     docker compose exec ollama ollama pull gemma3:4b
   ollama:
     image: ollama/ollama:0.40.8
     environment:
-      OLLAMA_KEEP_ALIVE: "-1"           # garde bge-m3 en mémoire : pas de rechargement de ~10 s par question
+      OLLAMA_KEEP_ALIVE: "-1"           # garde les modèles en mémoire (~5 Go) : pas de rechargement de ~10 s
     ports:
       - "127.0.0.1:11434:11434"
     volumes:

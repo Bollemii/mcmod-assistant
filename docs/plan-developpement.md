@@ -103,9 +103,27 @@ Objectif : des réponses fondées sur le wiki et les notes de patch, avec leurs 
   - la latence ;
   - le coût par question.
 - [ ] **Évaluation des réponses** (justesse, latence, coût) : à lancer avec l'accord du
-      propriétaire, car elle fait ~110 appels au LLM (voir [AGENTS.md](../AGENTS.md)).
+      propriétaire, car elle fait ~110 appels au LLM (voir [CLAUDE.md](../CLAUDE.md)).
 - [ ] Réglage de l'effort du LLM (`low` par défaut) et, si besoin, comparaison avec
       un modèle moins cher, **à partir des mesures**.
+
+### Corrections après l'essai en jeu (07/11)
+
+- [x] Base injoignable (Docker arrêté) : le LLM n'est plus appelé, la réponse renvoie
+      vers le wiki ; message « Docker est-il lancé ? » dans les journaux de l'API.
+- [x] Temps de recherche et temps du LLM enregistrés séparément (`search_ms`, `llm_ms`).
+- [x] Extraits utilisés enregistrés aussi par leur clé stable (`queries.chunk_keys`),
+      qui survit au rechargement de la base. Migration automatique des bases existantes.
+
+### Mode allégé (07/11)
+
+- [x] Essai de LLM locaux sur processeur (Ollama, Core Ultra 5 sans carte graphique) :
+      `gemma3:4b` 9 réponses justes sur 10 en ~24 s, `ministral-3:3b` 6/10, `qwen3:4b`
+      inutilisable. Goulot : la lecture du prompt (~70 tokens/s).
+- [x] Gemini reste le fournisseur principal, avec son prompt complet. S'il échoue,
+      bascule vers `gemma3:4b` avec un prompt allégé (4 extraits de 700 caractères) ;
+      réponse marquée « mode allégé » en jeu ; Gemini mis en pause selon l'erreur.
+- [x] Client : attente portée à 90 s.
 
 ### Mise à jour des sources
 
@@ -159,26 +177,42 @@ plutôt qu'une invention sur les questions hors sujet.
 ## Phase 3 — Connaissances Minecraft vanilla
 
 Objectif : répondre aux questions de jeu de base (crafts, mécaniques), en laissant
-la priorité aux règles du serveur.
+la priorité aux règles du serveur. Exemple réel du 07/11 : « comment craft une table
+d'enchant ? » a reçu la recette de mémoire, sans préciser que l'équipement Excalia ne
+s'enchante pas.
 
 - [x] Version de Minecraft du serveur : **26.2**.
-- [ ] Lire la data version de 26.2 (`version.json` du jar, champ `world_version`)
-      et l'ajouter dans `mc_versions`.
-- [ ] Extraction depuis le jar client 26.2 (37 Mo, téléchargé depuis les serveurs de Mojang) :
-  - [ ] recettes (`data/minecraft/recipe/*.json`) → `items`, `recipes` ;
-  - [ ] fichiers de langue `fr_fr.json` / `en_us.json` → `item_aliases`.
-- [ ] Détection d'entités dans la question (alias → item → recettes) et injection des
-      recettes dans le prompt.
-- [ ] Ingestion du wiki Minecraft FR via l'API MediaWiki, en se limitant aux pages
-      utiles (items, blocs, mécaniques). Respect de la licence CC BY-NC-SA : source
-      citée dans les réponses.
-- [ ] Gestion des conflits serveur / vanilla : priorités, recettes `disabled`,
-      consigne explicite dans le prompt.
-- [ ] Ajout de questions vanilla et de questions piège (recette modifiée par
-      Excalia) au jeu d'évaluation.
+- [ ] **Sources locales d'abord** : le launcher a déjà installé le jeu dans
+      `.minecraft` (jar `versions/26.2/26.2.jar`, index `assets/indexes/*.json` et
+      `assets/objects/`). Si les fichiers y sont, aucun téléchargement. Sinon,
+      téléchargement depuis les serveurs de Mojang (~37 Mo, **avec accord**, voir CLAUDE.md).
+- [ ] Data version de 26.2 (`version.json` du jar, champ `world_version`) → `mc_versions`.
+- [ ] Extraction :
+  - [ ] recettes (`data/minecraft/recipe/*.json` du jar : forme, sans forme, cuisson,
+        forgeron, tailleur de pierre) → `items`, `recipes` ;
+  - [ ] noms des objets : `en_us.json` (dans le jar) et `fr_fr.json` (dans les assets)
+        → `item_aliases`, avec les formes sans accent et au pluriel.
+- [ ] Détection d'entités : les mots de la question sont comparés aux alias (« table
+      d'enchant » → `minecraft:enchanting_table`), en tolérant les fautes et les
+      abréviations courantes ; les recettes trouvées sont injectées dans le prompt,
+      avant les extraits du wiki.
+- [ ] Priorité au serveur :
+  - [ ] les recettes et règles du serveur trouvées dans le wiki Excalia passent avant
+        la recette vanilla ;
+  - [ ] liste par serveur des objets désactivés ou modifiés (`recipes.disabled`,
+        `servers.toml`) ;
+  - [ ] consigne explicite dans le prompt (« recette vanilla, peut différer sur le serveur »).
+- [ ] Wiki Minecraft FR (API MediaWiki), limité aux pages utiles (blocs, objets,
+      mécaniques), licence CC BY-NC-SA citée. Volume à estimer avant tout appel :
+      **scraping soumis à accord** (CLAUDE.md). À décider après les étapes précédentes :
+      les recettes seules couvrent peut-être l'essentiel.
+- [ ] Jeu d'évaluation : ~20 questions vanilla (recettes, cuisson, mécaniques) et
+      ~10 questions piège (objet modifié ou interdit par Excalia), mesurées d'abord en
+      recherche seule (local, sans LLM).
 
 **Critère de fin** : `/assist Comment craft un four ?` renvoie la recette exacte, et
-une question sur un item modifié par Excalia renvoie la version du serveur.
+une question sur un objet modifié par Excalia (table d'enchantement, four nucléaire)
+renvoie la version du serveur.
 
 ## Phase 4 — Apprentissage autonome à partir du chat
 
@@ -190,8 +224,9 @@ Objectif : enrichir la base avec les réponses que les joueurs se donnent entre 
   - **logs client** (`logs/latest.log`, `logs/*.log.gz`) : historique déjà disponible ;
   - **capture en direct** avec ChatTriggers (`register("chat", …)`) : format plus
     propre, mais seulement à partir de maintenant.
-- [ ] Relever le format réel du chat d'Excalia et ajuster `role_prefixes` dans
-      `servers.toml` (préfixes admin, modérateur, guide).
+- [x] Relever le format réel du chat d'Excalia (07/11) : symbole de grade devant le
+      pseudo (`ॐ Lorn87: …`), table `[excalia.chat.grades]` dans `servers.toml`
+      (14 symboles ; `꒔` inconnu, Développeur à confirmer).
 - [ ] Analyseur du chat : canaux publics seulement (MP exclus), rôle lu dans le préfixe,
       **pseudonymisation** (HMAC), écriture dans `players` et `chat_messages`.
 - [ ] Extraction hors ligne par le LLM : question canonique, réponse canonique,
@@ -245,7 +280,9 @@ phase 2, et moins de 5 % des faits actifs contrôlés à la main sont faux.
 
 ## Prochaine étape
 
-Fin de la phase 2 : **évaluer la justesse des réponses** (`python -m eval.run_eval`).
-Elle demande ~110 appels au LLM (une réponse et un jugement par question) : à lancer
-avec l'accord du propriétaire, sur Gemini ou sur un LLM local servi par Ollama
-(voir [AGENTS.md](../AGENTS.md)). Puis un essai en jeu de `/assist` et `/assist maj`.
+Phase 3, en commençant par **vérifier ce que le launcher a déjà installé dans
+`.minecraft`** (jar 26.2 et fichiers de langue) : si tout y est, l'extraction des
+recettes et des noms français se fait sans aucun téléchargement.
+
+Reste de la phase 2 : l'évaluation de la justesse des réponses (~110 appels au LLM),
+à lancer avec l'accord du propriétaire.
