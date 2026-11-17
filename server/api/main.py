@@ -28,6 +28,7 @@ from .embeddings import Embedder, EmbeddingUnavailable, make_embedder
 from .llm import Answer, Answerer, LLMUnavailable, make_answerer
 from .ratelimit import RateLimiter
 from .db import migrate
+from .items import ItemIndexCache, recipe_context
 from .retrieval import ContextChunk, search
 from .servers import ServerInfo, ServerRegistry
 from .settings import Settings, from_env
@@ -77,7 +78,7 @@ def make_sources(answer: Answer, context: list[ContextChunk], server: ServerInfo
     """Extraits cités par le LLM -> liens cliquables ; à défaut, le wiki du serveur."""
     out, seen = [], set()
     for n in answer.cited:
-        if 1 <= n <= len(context) and context[n - 1].url not in seen:
+        if 1 <= n <= len(context) and context[n - 1].url and context[n - 1].url not in seen:
             c = context[n - 1]
             seen.add(c.url)
             last = c.heading_path[-1] if c.heading_path else ""
@@ -159,6 +160,7 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
     app.state.limiter = RateLimiter(settings.rate_limit, settings.rate_window_s)
     app.state.pool = app.state.embedder = app.state.refresher = None
     app.state.migrated = False
+    app.state.items = ItemIndexCache()
     if pool is not None or not settings.database_url:
         setup_rag(pool)      # sinon : au démarrage (lifespan)
 
@@ -214,16 +216,30 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
             log.warning("Embeddings indisponibles, recherche plein texte seule : %s. %s", e, DOCKER_HINT)
         try:
             with app.state.pool.connection(timeout=5) as conn:
-                return search(conn, question, qvec, server.slug if server else None,
-                              settings.top_k, settings.max_chunks_per_doc), qvec, True
+                found = search(conn, question, qvec, server.slug if server else None,
+                               settings.top_k, settings.max_chunks_per_doc)
+                return recipes_for(conn, question, server) + found, qvec, True
         except Exception as e:
             log.warning("Recherche impossible (%s). %s", e, DOCKER_HINT)
             return [], qvec, False
+
+    def recipes_for(conn, question: str, server: ServerInfo | None) -> list[ContextChunk]:
+        """Recettes des objets cités dans la question, placées avant les extraits du wiki."""
+        try:
+            index = app.state.items.get(conn)
+            matches = index.detect(question, server.slug if server else None)
+            return recipe_context(index, matches, server.name if server else None,
+                                  server.items if server else None)
+        except Exception as e:   # sans les recettes, la réponse reste possible
+            log.warning("Détection des objets impossible : %s", e)
+            conn.rollback()
+            return []
 
     def log_query_db(server: ServerInfo | None, c: Caller, question: str, qvec, answer: Answer,
                      context: list[ContextChunk], timings: dict) -> int | None:
         if not app.state.pool:
             return None
+        chunks = [x for x in context if x.kind != "game_data"]
         try:
             with app.state.pool.connection(timeout=5) as conn:
                 if not app.state.migrated:      # la base a pu démarrer après l'API
@@ -231,12 +247,13 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
                     app.state.migrated = True
                 return conn.execute(
                     """INSERT INTO queries (server_id, player_hash, question, q_embedding, answer, chunk_ids,
-                                            chunk_keys, model, latency_ms, search_ms, llm_ms)
-                       VALUES ((SELECT id FROM servers WHERE slug = %s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                            chunk_keys, recipe_ids, model, latency_ms, search_ms, llm_ms)
+                       VALUES ((SELECT id FROM servers WHERE slug = %s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                        RETURNING id""",
                     (server.slug if server else None, c.hash[:16], question,
                      np.asarray(qvec, dtype=np.float32) if qvec is not None else None, answer.text,
-                     [x.id for x in context], [x.key for x in context], answer.model,
+                     [x.id for x in chunks], [x.key for x in chunks], [i for x in context for i in x.recipe_ids],
+                     answer.model,
                      timings["latency_ms"], timings["search_ms"], timings["llm_ms"])).fetchone()[0]
         except Exception as e:
             log.warning("Journalisation de la question en base impossible : %s", e)
@@ -274,7 +291,7 @@ def create_app(settings: Settings | None = None, answerer: Answerer | None = Non
                   "mc_version": req.mc_version, "question": question, "answer": answer.text,
                   "refused": answer.refused, "model": answer.model, "degraded": answer.degraded, **timings,
                   "input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
-                  "chunks": [x.url for x in context], "cited": answer.cited,
+                  "chunks": [x.url or x.key for x in context], "cited": answer.cited,
                   "sources": [s.url for s in sources]}
         settings.log_file.parent.mkdir(parents=True, exist_ok=True)
         with settings.log_file.open("a", encoding="utf8") as f:

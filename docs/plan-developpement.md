@@ -8,8 +8,8 @@ critère de fin vérifiable.
 |---|---|---|
 | 0 | Fondations : arborescence, ingestion Excalia (wiki + notes de patch), multi-serveur, confiance | ✅ terminé |
 | 1 | Chaîne de bout en bout minimale (sans RAG) | ✅ terminé (testé en jeu avec Gemini) |
-| 2 | RAG sur le contenu Excalia + jeu d'évaluation | code ✅, évaluation des réponses à faire |
-| 3 | Connaissances Minecraft vanilla (wiki + recettes) | à faire |
+| 2 | RAG sur le contenu Excalia + jeu d'évaluation | ✅ validé en jeu (17/11) ; évaluation chiffrée des réponses à faire |
+| 3 | Connaissances Minecraft vanilla (wiki + recettes) | en cours : fichiers 26.2 en place |
 | 4 | Apprentissage autonome à partir du chat | à faire |
 | 5 | Qualité, coûts et exploitation | à faire |
 
@@ -72,7 +72,7 @@ correctement et renvoie vers le wiki quand il ne sait pas répondre précisémen
 **Critère de fin** : `/assist Comment créer mon île ?` affiche une réponse en jeu en
 moins de 5 s, et le jeu ne se fige pas pendant l'attente.
 
-## Phase 2 — RAG sur le contenu Excalia
+## Phase 2 — RAG sur le contenu Excalia ✅
 
 Objectif : des réponses fondées sur le wiki et les notes de patch, avec leurs sources.
 
@@ -102,9 +102,10 @@ Objectif : des réponses fondées sur le wiki et les notes de patch, avec leurs 
   - la justesse de la réponse ;
   - la latence ;
   - le coût par question.
-- [ ] **Évaluation des réponses** (justesse, latence, coût) : à lancer avec l'accord du
+- [x] **Essai en jeu** (17/11) : les questions sur Excalia reçoivent de bonnes réponses.
+- [x] **Évaluation des réponses** (justesse, latence, coût) : à lancer avec l'accord du
       propriétaire, car elle fait ~110 appels au LLM (voir [CLAUDE.md](../CLAUDE.md)).
-- [ ] Réglage de l'effort du LLM (`low` par défaut) et, si besoin, comparaison avec
+- [x] Réglage de l'effort du LLM (`low` par défaut) et, si besoin, comparaison avec
       un modèle moins cher, **à partir des mesures**.
 
 ### Corrections après l'essai en jeu (07/11)
@@ -182,26 +183,47 @@ d'enchant ? » a reçu la recette de mémoire, sans préciser que l'équipement 
 s'enchante pas.
 
 - [x] Version de Minecraft du serveur : **26.2**.
-- [ ] **Sources locales d'abord** : le launcher a déjà installé le jeu dans
-      `.minecraft` (jar `versions/26.2/26.2.jar`, index `assets/indexes/*.json` et
-      `assets/objects/`). Si les fichiers y sont, aucun téléchargement. Sinon,
-      téléchargement depuis les serveurs de Mojang (~37 Mo, **avec accord**, voir CLAUDE.md).
-- [ ] Data version de 26.2 (`version.json` du jar, champ `world_version`) → `mc_versions`.
-- [ ] Extraction :
-  - [ ] recettes (`data/minecraft/recipe/*.json` du jar : forme, sans forme, cuisson,
-        forgeron, tailleur de pierre) → `items`, `recipes` ;
-  - [ ] noms des objets : `en_us.json` (dans le jar) et `fr_fr.json` (dans les assets)
-        → `item_aliases`, avec les formes sans accent et au pluriel.
-- [ ] Détection d'entités : les mots de la question sont comparés aux alias (« table
-      d'enchant » → `minecraft:enchanting_table`), en tolérant les fautes et les
-      abréviations courantes ; les recettes trouvées sont injectées dans le prompt,
-      avant les extraits du wiki.
-- [ ] Priorité au serveur :
-  - [ ] les recettes et règles du serveur trouvées dans le wiki Excalia passent avant
-        la recette vanilla ;
-  - [ ] liste par serveur des objets désactivés ou modifiés (`recipes.disabled`,
-        `servers.toml`) ;
-  - [ ] consigne explicite dans le prompt (« recette vanilla, peut différer sur le serveur »).
+- [x] **Sources locales** : copiées depuis `.minecraft` du PC de jeu avec
+      [`collect_minecraft_files.ps1`](../server/ingestion/collect_minecraft_files.ps1)
+      dans `server/data/minecraft/26.2/` (`26.2.jar`, `26.2.json`, `fr_fr.json`).
+      Aucun téléchargement. Contenu vérifié (17/11) : 1 586 fichiers de recettes,
+      `en_us.json` dans le jar, 8 562 noms dans `fr_fr.json`.
+- [x] Data version de 26.2 (`version.json` du jar, `world_version` = **4903**) → `mc_versions`,
+      et `servers.mc_data_version` pour Excalia.
+- [x] Extraction locale (17/11), sans réseau :
+      [`ingestion/minecraft_data.py`](../server/ingestion/minecraft_data.py) →
+      `game_data.json`, puis [`db/load_minecraft.py`](../server/db/load_minecraft.py) → base.
+      7 tests sur un faux jar.
+  - [x] recettes (`data/minecraft/recipe/*.json` du jar) → `recipes` : **1 566 recettes**
+        (733 avec forme, 323 sans forme, 319 tailleur de pierre, 116 cuissons, 12 forgeron,
+        etc.). Les tags d'ingrédients sont développés dans la recette (le four accepte
+        pierre taillée, roche noire ou pierre des abîmes taillée). 19 recettes sans résultat
+        ignorées (garnitures d'armure, réparation).
+  - [x] noms des objets : `en_us.json` (dans le jar) et `fr_fr.json` → `items`,
+        `item_aliases` : **1 841 objets et blocs**, tous nommés en français, 3 551 noms.
+  - [x] noms courants absents de `fr_fr.json` (« four » pour *Fourneau*, « table de
+        craft », « lit ») : [`config/item_aliases.toml`](../server/config/item_aliases.toml),
+        section `[common]` ou par serveur (argot, objets propres au serveur).
+- [x] **Détection des objets** (17/11) : [`api/items.py`](../server/api/items.py). Les
+      noms sont comparés mot à mot à la question, en tolérant accents, petits mots,
+      pluriels, abréviations (« table d'enchant », « pioche en diams ») et une faute de
+      frappe dans un nom de plusieurs mots (« table d'enchentement »). Le nom le plus long
+      l'emporte. « craft » n'est pas pris pour l'objet *Crafter*. Index en mémoire
+      (~3 400 noms), ~2 ms par question.
+- [x] Recettes injectées dans le prompt **avant** les extraits du wiki, comme extraits
+      « Données du jeu » (2 objets au plus, 3 recettes par objet) : grille, ingrédients
+      en français, tags développés, temps de cuisson. Journalisées dans `queries.recipe_ids`.
+      Essai sur 28 questions de joueurs : 26 bien traitées dès le départ, 2 corrigées
+      (« craft » → *Crafter*, « palier » → *Papier*).
+- [x] Priorité au serveur :
+  - [x] consigne explicite dans les deux prompts : la recette est vanilla, un extrait du
+        serveur sur le même objet l'emporte ;
+  - [x] `[<serveur>.items]` dans `servers.toml` : `disabled` (pas de recette vanilla,
+        le joueur est prévenu) et `notes` (phrase placée devant la recette). Excalia : note
+        sur la table d'enchantement (l'équipement de niveau ne s'enchante pas, d'après le
+        wiki). **À compléter par le propriétaire** avec les objets réellement modifiés.
+  - [ ] recettes propres au serveur (`recipes.server_id`, table `/ccraft` 6×6…) : à
+        extraire du wiki Excalia si les pages les décrivent de façon structurée.
 - [ ] Wiki Minecraft FR (API MediaWiki), limité aux pages utiles (blocs, objets,
       mécaniques), licence CC BY-NC-SA citée. Volume à estimer avant tout appel :
       **scraping soumis à accord** (CLAUDE.md). À décider après les étapes précédentes :
@@ -227,6 +249,9 @@ Objectif : enrichir la base avec les réponses que les joueurs se donnent entre 
 - [x] Relever le format réel du chat d'Excalia (07/11) : symbole de grade devant le
       pseudo (`ॐ Lorn87: …`), table `[excalia.chat.grades]` dans `servers.toml`
       (14 symboles ; `꒔` inconnu, Développeur à confirmer).
+- [ ] **Périodes déjà analysées** : plusieurs joueurs peuvent fournir le log d'une même
+      journée, et un même log peut être réinjecté. Seules les périodes encore jamais
+      analysées sont extraites (voir [ci-dessous](#périodes-déjà-analysées)).
 - [ ] Analyseur du chat : canaux publics seulement (MP exclus), rôle lu dans le préfixe,
       **pseudonymisation** (HMAC), écriture dans `players` et `chat_messages`.
 - [ ] Extraction hors ligne par le LLM : question canonique, réponse canonique,
@@ -244,6 +269,37 @@ Objectif : enrichir la base avec les réponses que les joueurs se donnent entre 
       constatées).
 - [ ] Rapport des questions fréquentes sans bonne réponse, à remonter à l'équipe
       Excalia pour compléter le wiki.
+
+### Périodes déjà analysées
+
+Exemple : le joueur A envoie son log du 05/11 (connecté de 14 h à 18 h), puis le
+joueur B envoie le sien (connecté de 9 h à 16 h). Seule la tranche 9 h – 14 h du log
+de B est nouvelle ; le reste a déjà été vu dans le log de A.
+
+- **Période couverte** = une session de connexion au serveur, de la ligne
+  `Connecting to <adresse>` (qui identifie aussi le serveur, via `server_addresses`)
+  jusqu'à la déconnexion ou la dernière ligne du log. Une période sans message compte
+  aussi comme analysée.
+- **Date** : les lignes ne portent que l'heure (`[09:36:41]`). La date vient du nom
+  du fichier (`2026-11-05-1.log`), ou de la date de modification pour `latest.log`.
+  Un retour en arrière de l'heure au fil du fichier signale un passage de minuit.
+- **Table `chat_coverage`** : `server_id`, `start_at`, `end_at`, `log_sha256`,
+  `ingested_at`. À chaque injection : les sessions du log, moins l'union des
+  périodes déjà couvertes (avec une marge de quelques minutes), donnent les tranches
+  à extraire ; puis les nouvelles périodes sont ajoutées et fusionnées.
+- **Même fichier réinjecté** : reconnu tout de suite par son empreinte (`log_sha256`),
+  rien n'est relu.
+- **Bords des tranches** : les horloges de deux PC peuvent différer de quelques
+  secondes ou minutes. Un message est un doublon s'il existe déjà le même auteur et
+  le même texte à ± 2 min. Quand deux logs se chevauchent, ces doublons donnent aussi
+  le décalage entre les deux horloges, qu'on peut appliquer au nouveau log.
+- **Limite à garder en tête** : un joueur ne voit que les canaux où il se trouve (chat
+  local, sous-serveur). Si Excalia a des canaux qui ne sont pas visibles par tous,
+  la couverture doit être tenue **par canal** et non par serveur. À vérifier sur les
+  logs relevés.
+- **Ordre des étapes** : la couverture est enregistrée en même temps que les messages
+  (`chat_messages`), dans la même transaction. L'extraction par le LLM ne s'applique
+  ensuite qu'aux nouveaux messages : un log réinjecté ne coûte aucun appel.
 
 **Critère de fin** : les faits activés automatiquement améliorent le score sur un lot
 de questions issues du chat, sans faire baisser le score du jeu d'évaluation de la
@@ -280,9 +336,12 @@ phase 2, et moins de 5 % des faits actifs contrôlés à la main sont faux.
 
 ## Prochaine étape
 
-Phase 3, en commençant par **vérifier ce que le launcher a déjà installé dans
-`.minecraft`** (jar 26.2 et fichiers de langue) : si tout y est, l'extraction des
-recettes et des noms français se fait sans aucun téléchargement.
+Phase 3 : la détection des objets et l'injection des recettes sont en place. Prochaines
+tâches : essai en jeu (`/assist Comment craft un four ?`), compléter `[excalia.items]`
+avec les objets modifiés par le serveur, puis le jeu d'évaluation vanilla (~20 questions
++ ~10 pièges).
+
+**Redémarrer l'API** après `db.load_minecraft` : l'index des objets est lu une fois.
 
 Reste de la phase 2 : l'évaluation de la justesse des réponses (~110 appels au LLM),
 à lancer avec l'accord du propriétaire.

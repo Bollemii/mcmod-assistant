@@ -1,6 +1,6 @@
 """Retrouve un serveur de servers.toml à partir de l'adresse envoyée par le client."""
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -11,6 +11,8 @@ class ServerInfo:
     description: str
     mc_version: str
     wiki_url: str | None
+    # [<serveur>.items] : objets désactivés et notes sur des objets vanilla modifiés (api/items.py)
+    items: dict = field(default_factory=dict, hash=False, compare=False)
 
 
 def normalize(address: str) -> str:
@@ -26,7 +28,8 @@ class ServerRegistry:
         self.by_address: dict[str, ServerInfo] = {}
         for slug, conf in tomllib.loads(path.read_text("utf8")).items():
             info = ServerInfo(slug=slug, name=conf["name"], description=conf.get("description", ""),
-                              mc_version=conf.get("mc_version", ""), wiki_url=conf.get("wiki_url"))
+                              mc_version=conf.get("mc_version", ""), wiki_url=conf.get("wiki_url"),
+                              items=conf.get("items", {}))
             for address in conf.get("addresses", []):
                 self.by_address[normalize(address)] = info
 

@@ -249,3 +249,24 @@ python ingestion/excalia_patch_notes.py
 ```
 
 Les résultats sont écrits dans `data/servers/excalia/`.
+
+### Données de Minecraft vanilla (objets, noms, recettes)
+
+Tout est lu dans les fichiers du jeu, **sans aucun appel réseau** ni embedding.
+Les fichiers sont copiés depuis le `.minecraft` d'un PC de jeu avec
+[`ingestion/collect_minecraft_files.ps1`](ingestion/collect_minecraft_files.ps1) dans
+`data/minecraft/<version>/` (`<version>.jar`, `<version>.json`, `fr_fr.json`).
+
+```bash
+python -m ingestion.minecraft_data --version 26.2   # -> data/minecraft/26.2/game_data.json
+python -m db.load_minecraft --version 26.2          # -> mc_versions, items, item_aliases, recipes
+```
+
+Le chargement peut être relancé : les recettes vanilla de la version sont remplacées,
+sans doublon. Il charge aussi les noms courants de
+[`config/item_aliases.toml`](config/item_aliases.toml) (« four », « table de craft »…).
+**Redémarre l'API** ensuite : l'index des objets est lu une seule fois.
+
+Quand une question cite un objet, sa recette vanilla est donnée au LLM avant les extraits
+du wiki ([`api/items.py`](api/items.py)). Les objets désactivés ou modifiés par un serveur
+se déclarent dans `servers.toml`, section `[<serveur>.items]`.

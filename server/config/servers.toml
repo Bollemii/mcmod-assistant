@@ -23,6 +23,14 @@ season = "saison3"
 wiki_url = "https://excalia.fr/wiki"     # renvoyé aux joueurs quand l'assistant ne sait pas
 description = "serveur Skyblock français, saison 3 au thème spatial"
 
+# Objets vanilla désactivés ou modifiés sur le serveur (api/items.py) :
+# - disabled : la recette vanilla n'est pas donnée, le joueur est prévenu ;
+# - notes : phrase placée devant la recette vanilla.
+[excalia.items]
+disabled = []
+[excalia.items.notes]
+"minecraft:enchanting_table" = "les outils et armes de niveau du serveur ne s'enchantent pas : leur force vient de leur maîtrise (wiki, Outils, métiers et compétences)."
+
 [excalia.sources.wiki]
 kind = "server_wiki"
 ingester = "excalia_wiki"

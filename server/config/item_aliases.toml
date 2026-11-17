@@ -1,0 +1,30 @@
+# Noms d'objets employés par les joueurs mais absents des fichiers de langue du jeu.
+# Chargés dans item_aliases par : python -m db.load_minecraft
+#
+# Inutile d'ajouter ici :
+# - les accents, majuscules, pluriels et petits mots (« table enchantement ») ;
+# - les abréviations par début de mot (« table d'enchant », « pioche en diams ») ;
+# - une faute de frappe par mot.
+# La détection (api/items.py) les tolère déjà.
+#
+# [common] : valable sur tous les serveurs.
+# [<serveur>] : argot ou objets propres à un serveur. Un identifiant hors « minecraft: »
+# (ex. « excalia:broyeur ») déclare un objet du serveur : son nom masque alors un nom
+# vanilla plus court (« four nucléaire » ne donnerait plus la recette du fourneau).
+
+[common]
+"minecraft:furnace" = ["four"]
+"minecraft:white_bed" = ["lit"]          # les lits n'ont que des noms de couleur
+"minecraft:crafting_table" = ["table de craft", "table de crafting"]
+"minecraft:enchanting_table" = ["table d'enchant", "enchant table"]
+"minecraft:smithing_table" = ["table de forgeron"]
+"minecraft:blast_furnace" = ["haut four"]
+"minecraft:ender_pearl" = ["perle d'ender", "ender perle"]
+"minecraft:ender_eye" = ["oeil d'ender", "oeil de l'end"]
+"minecraft:experience_bottle" = ["bouteille d'xp", "fiole d'xp"]
+"minecraft:redstone" = ["redstone"]
+"minecraft:golden_apple" = ["pomme d'or", "gapple"]
+"minecraft:enchanted_golden_apple" = ["pomme de notch", "notch apple"]
+"minecraft:shulker_box" = ["shulker"]
+
+[excalia]

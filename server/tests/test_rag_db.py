@@ -25,6 +25,7 @@ from api.refresh import RefreshManager
 from api.retrieval import search
 from api.settings import SERVER_DIR, Settings
 from db.load import load_source, sync_config
+from db.load_minecraft import load_custom_aliases, load_game_data
 
 TEST_URL = os.environ.get("ASSIST_TEST_DATABASE_URL")
 WIKI = "https://excalia.fr/wiki/"
@@ -213,6 +214,55 @@ class RagDatabaseTest(unittest.TestCase):
             (int(body["query_id"]),)).fetchone()
         self.assertEqual(keys[0], "excalia:wiki:ile0")          # clé stable, survit à un rechargement
         self.assertTrue(0 <= search_ms <= latency and 0 <= llm_ms <= latency)
+
+    def test_ask_with_recipe(self):
+        """Objet cité -> recette vanilla en premier extrait, note du serveur, recipe_ids journalisés."""
+        self.load()
+        game_data = {
+            "version": {"name": "26.2", "data_version": 4903},
+            "items": [{"id": "minecraft:enchanting_table", "fr": ["Table d'enchantement"], "en": []},
+                      {"id": "minecraft:obsidian", "fr": ["Obsidienne"], "en": []}],
+            "recipes": [{"id": "minecraft:enchanting_table", "type": "crafting_shaped",
+                         "result": "minecraft:enchanting_table", "count": 1,
+                         "pattern": {"key": {"#": "minecraft:obsidian"}, "pattern": ["###"]}}],
+        }
+        stats = load_game_data(self.conn, game_data, {"excalia": {"mc_version": "26.2"}})
+        self.assertEqual(stats, {"items": 2, "aliases": 2, "recipes": 1})
+        load_game_data(self.conn, game_data)                    # rechargement : pas de doublon
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM recipes").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT mc_data_version FROM servers WHERE slug = 'excalia'")
+                         .fetchone()[0], 4903)
+        load_custom_aliases(self.conn, {"common": {"minecraft:enchanting_table": ["table d'enchant"]}})
+
+        pool = make_pool(TEST_URL)
+        self.addCleanup(pool.close)
+
+        class Recorder:
+            context = None
+
+            async def answer(self, question, server, mc_version, context=()):
+                Recorder.context = list(context)
+                return Answer("Obsidienne.", "fake", cited=[1])
+
+        tmp = Path(tempfile.mkdtemp())
+        settings = replace(Settings(llm="fake"), tokens_file=tmp / "t.txt", log_file=tmp / "q.jsonl",
+                           refresh_check_s=0)
+        token = tokens.create(settings.tokens_file, "Testeur")
+        client = TestClient(create_app(settings, Recorder(), embedder=self.embedder, pool=pool))
+        r = client.post("/v1/ask", json={"question": "comment craft une table d'enchant ?",
+                                         "server": "play.excalia.fr"},
+                        headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(r.status_code, 200)
+        first = Recorder.context[0]
+        self.assertEqual((first.kind, first.key), ("game_data", "recipe:minecraft:enchanting_table"))
+        self.assertIn("# = Obsidienne", first.content)
+        self.assertIn("Sur Excalia :", first.content)           # note de [excalia.items] (servers.toml)
+        # extrait sans URL : la source affichée retombe sur le wiki du serveur
+        self.assertEqual(r.json()["sources"], [{"title": "Wiki Excalia", "url": "https://excalia.fr/wiki"}])
+        recipe_ids, chunk_keys = self.conn.execute("SELECT recipe_ids, chunk_keys FROM queries WHERE id = %s",
+                                                   (int(r.json()["query_id"]),)).fetchone()
+        self.assertEqual(len(recipe_ids), 1)
+        self.assertFalse(any(k.startswith("recipe:") for k in chunk_keys))
 
     def test_migration_on_old_database(self):
         self.conn.execute("ALTER TABLE queries DROP COLUMN chunk_keys, DROP COLUMN search_ms, DROP COLUMN llm_ms")

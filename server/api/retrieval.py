@@ -33,6 +33,7 @@ class ContextChunk:
     score: float = 0.0
     ranks: dict = field(default_factory=dict)
     key: str = ""                # chunk_key : stable d'un rechargement à l'autre, contrairement à id
+    recipe_ids: list[int] = field(default_factory=list)   # extrait « Données du jeu » (api/items.py)
 
     @property
     def section(self) -> str:
